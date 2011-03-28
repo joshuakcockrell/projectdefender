@@ -9,6 +9,45 @@ client_to_server_events = []
 
 
 ################### stuff from serverneeds.py (aka example1.py)
+
+class CPUSpineerController():
+    def __init__(self, eventManager):
+        self.eventManager = eventManager
+        self.eventManager.register_listener(self)
+        self.running = True
+
+    def run(self):
+        while self.running:
+            newEvent = TickEvent()
+            self.eventManager.post(newEvent)
+
+    def notify(self, event):
+        if isinstance(event, QuitEvent):
+            self.running = False
+
+
+class PygameView():
+    def __init__(self, eventManager):
+        self.eventManager = eventManager
+        self.eventManager.register_listener(self)
+
+        pygame.init()
+        self.screen = pygame.display.set_mode((800, 640))
+        pygame.display.set_caption('Dude! if you can see this, its working!!!')
+        self.background = pygame.Surface(self.screen.get_size())
+        self.background.fill((120,235,22))
+        self.screen.blit(self.background, (0,0))
+        pygame.display.flip()
+
+        self.character_sprites = pygame.sprite.RenderUpdates()
+
+    def show_character(self, character):
+        characterSprite = CharacterSprite(self.character_sprites)
+        position = character.position
+        
+        
+
+
 class Character():
     '''the character object'''
     def __init__(self, eventManager):
@@ -238,13 +277,79 @@ class PhonyModel(object):
             return None
         object_ids = response[0]
         object_dictionary = response[1]
-        objects = self.shared_objects[object_id]
+        the_object = self.shared_objects[object_id]
 
-        
+        retval = the_object.setCopyableState(object_dictionary, self.shared_objects)
+        if retval[0] == True:
+            return the_object
+        for remaining_object_id in retval[1]:
+            remoteResponse = self.server.callRemote('GetObjectState', remaining_object_id)
+            remoteResponse.addCallback(self.StateReturned)
+
+        retval = obj.setCopyableState(object_dictionary, self.shared_objects)
+        if retval[0] == False:
+            print 'ummm why is that wierd? i dont know, but it is.'
+            return None
+
+        return the_object
+
+    def notify(self, event):
+        if isinstance(event, ServerConnectEvent):
+            self.server = event.server
+        elif isinstance(event, CopyableGameStartedEvent):
+            game_id = event.game_id
+            if not self.game:
+                self.game = Game(self.phonyEventManager)
+                self.shared_objects[game_id] = self.game
+                
+            print 'sending the thing to the real em'
+            newEvent = GameStartedEvent(self.game)
+            self.realEventManager.post(newEvent)
+
+
+        if isinstance(event, CopyableCharacterSpawnEvent):
+            character_id = event.character_id
+            if self.shared_objects.has_key(character_id):
+                character = self.shared_objects[character_id]
+                newEvent = CharacterPlaceEvent(character)
+                self.realEventManager.post(event)
+            else:
+                character = self.game.players[0].characters[0]
+                self.shared_objects[character_id] = character
+                remoteResponse = self.server.callRemote('GetObjectState', character_id)
+                remoteResponse.addCallback(self.StateReturned)
+                remoteResponse.addCallback(self.CharacterSpawnCallback)
+
+        if isinstance(event, CopyableCharacterMoveEvent):
+            character_id = event.character_id
+            if self.shared_objects.has_key(character_id):
+                character = self.shared_objects[character_id]
+            else:
+                character = self.game.players[0].characters[0]
+                self.shared_objects[character_id] = character
+            remoteResponse = self.server.callRemote('GetObjectState', character_id)
+            remoteResponse.addCallback(self.StateReturned)
+            remoteResponse.addCallback(self.CharacterMoveRequestCallback)
+            
+
+    def CharacterSpawnCallback(self, character):
+        newEvent = CharacterSpawnEvent(character)
+        self.realEventManager.post(event)
+
+    def CharacterMoveCallback(self, character):
+        newEvent = CharacterMoveEvent(character)
+        self.realEventManager.post(event)
+
+def main():
+
+    eventManager = EventManager()
+    sharedObjectRegistry = {}
+
+    keyboardController = KeyboardController(eventManager)
+    spinnerController = CPUSpinnerController(eventManager)
+
+    pygameView = PygameView(eventManager)
     
-
-
-
 
 
 
