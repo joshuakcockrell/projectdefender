@@ -89,6 +89,7 @@ class ClientConnectEvent(Event):
 
 
 class EventManager():
+    '''super class event manager'''
     def __init__(self):
         from weakref import WeakKeyDictionary
         self.listeners = WeakKeyDictionary()
