@@ -44,6 +44,37 @@ class PygameView():
     def show_character(self, character):
         characterSprite = CharacterSprite(self.character_sprites)
         position = character.position
+        characterSprite = position
+
+    def move_character(self, character):
+        characterSprite = self.get_character_sprite(character)
+
+        position = character.position
+        characterSprite.move_to(position)
+
+    def get_character_sprite(self, character):
+        for c in self.character_sprites:
+            return c
+
+    def notify(self, event):
+        if isinstance(event, TickEvent):
+            self.screen.blit(self.background, (0,0))
+            self.character_sprites.update()
+
+            self.character_sprites.draw(screen)
+
+            pygame.display.flip()
+
+        elif isinstance(event, CharacterSpawnEvent):
+            self.show_character(event.character)
+
+        elif isinstance(event, CharacterMoveEvent):
+            self.move_character(event.character)
+
+        
+
+            
+        
         
         
 
@@ -343,7 +374,7 @@ class PhonyModel(object):
 def main():
 
     eventManager = EventManager()
-    sharedObjectRegistry = {}
+    shared_object_registry = {}
 
     keyboardController = KeyboardController(eventManager)
     spinnerController = CPUSpinnerController(eventManager)
@@ -351,6 +382,14 @@ def main():
     pygameView = PygameView(eventManager)
     
 
+    phonyModel = PhonyModel(eventManager, shared_object_registry)
+
+    serverController = NetworkServerController(eventManager)
+    serverView = NetworkServerView(eventManager, shared_object_registry)
+
+    spinnerController.run()
+    print 'running complete'
+    print eventManager.event
 
 
 
