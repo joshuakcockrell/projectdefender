@@ -251,9 +251,9 @@ class Game():
             
 
 def main():
-    print '#######################################'
-    print '##### Starting Defense RPG Server #####'
-    print '#######################################'
+    print '############################################'
+    print '##### Starting Project Defender Server #####'
+    print '############################################'
     print 'Loading...'
     
     eventManager = ServerEventManager()
@@ -270,7 +270,7 @@ def main():
     reactor.listenTCP(24100, pb.PBServerFactory(clientController))
 
     print 'Loading Complete!'
-    print 'Running Reactor...'
+    print 'Running PRogram...'
     reactor.run()
 
 
