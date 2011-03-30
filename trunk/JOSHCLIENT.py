@@ -1,4 +1,6 @@
 import os
+import pygame
+from pygame.locals import *
 from twisted.spread import pb
 from twisted.internet.selectreactor import SelectReactor
 from twisted.internet.main import installReactor
@@ -106,7 +108,7 @@ class EventManager():
         if listener in self.listeners:
             del self.listeners[listener]
     def post(self, event):
-        self.eventQueue.append(event)
+        self.event_queue.append(event)
         if isinstance(event, TickEvent):
             self._process_event_queue()
         else:
@@ -127,7 +129,7 @@ class EventManager():
 
 ################### stuff from serverneeds.py (aka example1.py)
 
-class CPUSpineerController():
+class CPUSpinnerController():
     def __init__(self, eventManager):
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
@@ -139,8 +141,29 @@ class CPUSpineerController():
             self.eventManager.post(newEvent)
 
     def notify(self, event):
-        if isinstance(event, QuitEvent):
+        if isinstance(event, ProgramQuitEvent):
             self.running = False
+
+class KeyboardController():
+    def __init__(self, eventManager):
+        self.eventManager = eventManager
+        self.eventManager.register_listener(self)
+
+    def notify(self, event):
+        if isinstance(event, TickEvent):
+            #go through the user input
+            for event in pygame.event.get():
+                newEvent = None
+                if event.type == QUIT:
+                    newEvent = ProgramQuitEvent()
+                elif event.type == KEYDOWN:
+                    if event.key in [pygame.K_ESCAPE]:
+                        newEvent = ProgramQuitEvent()
+                    elif event.key in [pygame.K_UP]:
+                        newEvent = CharacterMoveRequest('UP')
+                if newEvent:
+                    self.eventManager.post(newEvent)
+
 
 
 class PygameView():
@@ -178,7 +201,7 @@ class PygameView():
             self.screen.blit(self.background, (0,0))
             self.character_sprites.update()
 
-            self.character_sprites.draw(screen)
+            self.character_sprites.draw(self.screen)
 
             pygame.display.flip()
 
@@ -333,59 +356,59 @@ class NetworkServerView(pb.Root):
             deferred.addErrback(self.connect_failed)
             self.reactor.startRunning()
 
-        def disconnect(self):
-            print 'disconnecting...'
-            if not self.reactor:
+    def disconnect(self):
+        print 'disconnecting...'
+        if not self.reactor:
+            return
+        print 'stopping the reactor...'
+        self.reactor.stop()
+        self.pump_reactor()
+        self.state = 'DISCONNECTING'
+
+    def connected(self, server):
+        print '...connected!'
+        self.server = server
+        self.state = 'CONNECTED'
+        newEvent = ServerConnectEvent(server)
+        self.eventManager.post(newEvent)
+
+    def connect_failed(self, server):
+        print '...Connection failed'
+        self.state = 'DISCONNECTED'
+
+    def pump_reactor(self):
+        self.reactor.runUntilCurrent()
+        self.reactor.doIteration(False)
+        
+    def notify(self, event):
+        if isinstance(event, TickEvent):
+            if self.state == 'PREPARING':
+                self.attempt_connection()
+            elif self.state in ['CONNECTED', 'DISCONNECTING', 'CONNECTING']:
+                self.pump_reactor()
+            return
+
+        if isinstance(event, ProgramQuitEvent):
+            self.disconnect()
+            return
+
+        if not isinstance(event, pb.Copyable):
+            event_name = event.__class__.__name__
+            copyable_class_name = 'Copyable' + event_name
+            if not hasattr(network, copyable_class_name):
                 return
-            print 'stopping the reactor...'
-            self.reactor.stop()
-            self.pump_reactor()
-            self.state = 'DISCONNECTING'
+            copyableClass = getattr(network, copyable_class_name)
+            event = copyableClass(event, self.shared_objects)
 
-        def connected(self, server):
-            print '...connected!'
-            self.server = server
-            self.state = 'CONNECTED'
-            newEvent = ServerConnectEvent(server)
-            self.eventManager.post(newEvent)
+        if event.__class__ not in client_to_server_events:
+            return
 
-        def connect_failed(self, server):
-            print '...Connection failed'
-            self.state = 'DISCONNECTED'
+        if self.server:
+            print 'client sending', str(event)
+            remoteCall = self.server.callRemote('EventOverNetwork', event)
 
-        def pump_reactor(self):
-            self.reactor.runUntilCurrent()
-            self.reactor.doIteration(False)
-            
-        def notify(self, event):
-            if isinstance(event, TickEvent):
-                if self.state == 'PREPARING':
-                    self.attempt_connection()
-                elif self.state in ['CONNECTED', 'DISCONNECTING', 'CONNECTING']:
-                    self.pump_reactor()
-                return
-
-            if isinstance(event, ProgramQuitEvent):
-                self.disconnect()
-                return
-
-            if not isinstance(event, pb.Copyable):
-                event_name = event.__class__.__name__
-                copyable_class_name = 'Copyable' + event_name
-                if not hasattr(network, copyable_class_name):
-                    return
-                copyableClass = getattr(network, copyable_class_name)
-                event = copyableClass(event, self.shared_objects)
-
-            if event.__class__ not in client_to_server_events:
-                return
-
-            if self.server:
-                print 'client sending', str(event)
-                remoteCall = self.server.callRemote('EventOverNetwork', event)
-
-            else:
-                print 'cannot send while disconnected:', str(event)
+        else:
+            print 'cannot send while disconnected:', str(event)
 
 
 class NetworkServerController(pb.Referenceable):
@@ -489,6 +512,10 @@ class PhonyModel(object):
         self.realEventManager.post(event)
 
 def main():
+    print '############################################'
+    print '##### Starting Project Defender Client #####'
+    print '############################################'
+    print 'Loading...'
 
     eventManager = EventManager()
     shared_object_registry = {}
@@ -497,15 +524,17 @@ def main():
     spinnerController = CPUSpinnerController(eventManager)
 
     pygameView = PygameView(eventManager)
-    
 
     phonyModel = PhonyModel(eventManager, shared_object_registry)
 
     serverController = NetworkServerController(eventManager)
     serverView = NetworkServerView(eventManager, shared_object_registry)
 
+    print 'Loading Complete!'
+    print 'Running Program...'
     spinnerController.run()
     print 'running complete'
     print eventManager.event
 
-
+if __name__ == '__main__':
+    main()
