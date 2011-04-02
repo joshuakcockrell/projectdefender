@@ -65,14 +65,6 @@ class CharacterMoveEvent(Event):
         self.name = 'Character Move Event'
         self.character = character
 
-class CharacterSpawnEvent(Event):
-    '''
-    when the character spawns at a position
-    '''
-    def __init__(self, character):
-        self.name = 'Character Spawn'
-        self.character = character
-
 class MouseClickEvent(Event):
     '''
     when a user clicks down on the mouse
@@ -251,109 +243,7 @@ class EventManager():
         # empty the queue
         self.event_queue = []
 
-
-
-################### stuff from serverneeds.py (aka example1.py)
-
-class CPUSpinnerController():
-    def __init__(self, eventManager):
-        self.eventManager = eventManager
-        self.eventManager.register_listener(self)
-        self.running = True
-
-    def run(self):
-        while self.running:
-            newEvent = TickEvent()
-            self.eventManager.post(newEvent)
-
-    def notify(self, event):
-        if isinstance(event, ProgramQuitEvent):
-            self.running = False
-
-class KeyboardController():
-    def __init__(self, eventManager):
-        self.eventManager = eventManager
-        self.eventManager.register_listener(self)
-
-    def notify(self, event):
-        if isinstance(event, TickEvent):
-            #go through the user input
-            for event in pygame.event.get():
-                newEvent = None
-                if event.type == QUIT:
-                    newEvent = ProgramQuitEvent()
-                elif event.type == KEYDOWN:
-                    if event.key in [pygame.K_ESCAPE]:
-                        newEvent = ProgramQuitEvent()
-                    elif event.key in [pygame.K_UP]:
-                        newEvent = CharacterMoveRequestEvent('UP')
-                if newEvent:
-                    self.eventManager.post(newEvent)
-
-
-class CharacterSprite(pygame.sprite.Sprite):
-    def __init__(self, group=None):
-        pygame.sprite.Sprite.__init__(self, group)
-        self.image = pygame.image.load(os.path.join('resources','character.png'))
-        self.image.convert()
-        self.rect = self.image.get_rect()
-
-        self.move_to = None # position to move to during update
-
-    def update(self):
-        #set the position to our new move to
-        if self.move_to:
-            self.rect.center = self.move_to
-            self.move_to = None
-
-
-class PygameView():
-    def __init__(self, eventManager):
-        self.eventManager = eventManager
-        self.eventManager.register_listener(self)
-
-        pygame.init()
-        self.screen = pygame.display.set_mode((800, 640))
-        pygame.display.set_caption('Dude! if you can see this, its working!!!')
-        self.background = pygame.Surface(self.screen.get_size())
-        self.background.fill((120,235,22))
-        self.screen.blit(self.background, (0,0))
-        pygame.display.flip()
-
-        self.character_sprites = pygame.sprite.RenderUpdates()
-
-    def show_character(self, character):
-        characterSprite = CharacterSprite(self.character_sprites)
-        position = character.position
-        characterSprite = position
-
-    def move_character(self, character):
-        characterSprite = self.get_character_sprite(character)
-
-        position = character.position
-        characterSprite.move_to(position)
-
-    def get_character_sprite(self, character):
-        for c in self.character_sprites:
-            return c
-
-    def notify(self, event):
-        if isinstance(event, TickEvent):
-            self.screen.blit(self.background, (0,0))
-            self.character_sprites.update()
-
-            self.character_sprites.draw(self.screen)
-
-            pygame.display.flip()
-
-        elif isinstance(event, CharacterSpawnEvent):
-            self.show_character(event.character)
-
-        elif isinstance(event, CharacterMoveEvent):
-            self.move_character(event.character)
-
-            
-        
+       
 ######################################
 
         
@@ -457,6 +347,102 @@ class NetworkServerController(pb.Referenceable):
     def notify(self, event):
         if isinstance(event, ServerConnectEvent):
             event.server.callRemote('ClientConnect', self)
+
+class CPUSpinnerController():
+    def __init__(self, eventManager):
+        self.eventManager = eventManager
+        self.eventManager.register_listener(self)
+        self.running = True
+
+    def run(self):
+        while self.running:
+            newEvent = TickEvent()
+            self.eventManager.post(newEvent)
+
+    def notify(self, event):
+        if isinstance(event, ProgramQuitEvent):
+            self.running = False
+
+class KeyboardController():
+    def __init__(self, eventManager):
+        self.eventManager = eventManager
+        self.eventManager.register_listener(self)
+
+    def notify(self, event):
+        if isinstance(event, TickEvent):
+            #go through the user input
+            for event in pygame.event.get():
+                newEvent = None
+                if event.type == QUIT:
+                    newEvent = ProgramQuitEvent()
+                elif event.type == KEYDOWN:
+                    if event.key in [pygame.K_ESCAPE]:
+                        newEvent = ProgramQuitEvent()
+                    elif event.key in [pygame.K_UP]:
+                        newEvent = CharacterMoveRequestEvent('UP')
+                if newEvent:
+                    self.eventManager.post(newEvent)
+
+
+class CharacterSprite(pygame.sprite.Sprite):
+    def __init__(self, group=None):
+        print 'created'
+        pygame.sprite.Sprite.__init__(self, group)
+        self.image = pygame.image.load(os.path.join('resources','character.png'))
+        self.image.convert()
+        self.rect = self.image.get_rect()
+
+        self.position = None # position to move to during update
+        self.set_position((100,100))
+
+    def set_position(self, position):
+        self.position = position
+    def update(self):
+        #set the position to our new move to
+        self.rect.center = self.position
+
+
+class PygameView():
+    def __init__(self, eventManager):
+        self.eventManager = eventManager
+        self.eventManager.register_listener(self)
+
+        pygame.init()
+        self.screen = pygame.display.set_mode((800, 640))
+        pygame.display.set_caption('Dude! if you can see this, its working!!!')
+        self.background = pygame.Surface(self.screen.get_size())
+        self.background.fill((120,235,22))
+        self.screen.blit(self.background, (0,0))
+        pygame.display.flip()
+        
+        self.character_sprites = pygame.sprite.RenderUpdates()
+
+        characterSprite = CharacterSprite(self.character_sprites)
+
+    def move_character(self, character):
+        characterSprite = self.get_character_sprite(character)
+
+        position = character.position
+        characterSprite.move_to(position)
+
+    def get_character_sprite(self, character):
+        for c in self.character_sprites:
+            return c
+
+    def notify(self, event):
+        if isinstance(event, TickEvent):
+            self.screen.blit(self.background, (0,0))
+            self.character_sprites.update()
+
+            self.character_sprites.draw(self.screen)
+
+            pygame.display.flip()
+
+
+        elif isinstance(event, CharacterMoveEvent):
+            self.move_character(event.character)
+
+            
 
 def main():
     print '############################################'
