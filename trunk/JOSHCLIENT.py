@@ -5,7 +5,6 @@ from twisted.spread import pb
 from twisted.internet.selectreactor import SelectReactor
 from twisted.internet.main import installReactor
 
-import joshnetwork
 
 class Event():
     '''
