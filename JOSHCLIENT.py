@@ -5,6 +5,7 @@ from twisted.spread import pb
 from twisted.internet.selectreactor import SelectReactor
 from twisted.internet.main import installReactor
 
+import joshnetwork
 
 class Event():
     '''
@@ -91,133 +92,6 @@ class ClientConnectEvent(Event):
         self.client = client
 
 
-server_to_client_events = []
-client_to_server_events = []
-
-class EventManager():
-    '''super class event manager'''
-    def __init__(self):
-        from weakref import WeakKeyDictionary
-        self.listeners = WeakKeyDictionary()
-        self.event_queue = []
-
-    def register_listener(self, listener):
-        self.listeners[listener] = True
-
-    def unregister_listener(self, listener):
-        if listener in self.listeners:
-            del self.listeners[listener]
-    def post(self, event):
-        self.event_queue.append(event)
-        if isinstance(event, TickEvent):
-            self._process_event_queue()
-        else:
-            print event.name
-
-    def _process_event_queue(self):
-        # goes through all the events and sends them to the listeners
-        event_number = 0
-        while event_number < len(self.event_queue):
-            event = self.event_queue[event_number]
-            for listener in self.listeners:
-                listener.notify(event)
-            event_number += 1
-        # empty the queue
-        self.event_queue = []
-
-
-
-################### stuff from serverneeds.py (aka example1.py)
-
-class CPUSpinnerController():
-    def __init__(self, eventManager):
-        self.eventManager = eventManager
-        self.eventManager.register_listener(self)
-        self.running = True
-
-    def run(self):
-        while self.running:
-            newEvent = TickEvent()
-            self.eventManager.post(newEvent)
-
-    def notify(self, event):
-        if isinstance(event, ProgramQuitEvent):
-            self.running = False
-
-class KeyboardController():
-    def __init__(self, eventManager):
-        self.eventManager = eventManager
-        self.eventManager.register_listener(self)
-
-    def notify(self, event):
-        if isinstance(event, TickEvent):
-            #go through the user input
-            for event in pygame.event.get():
-                newEvent = None
-                if event.type == QUIT:
-                    newEvent = ProgramQuitEvent()
-                elif event.type == KEYDOWN:
-                    if event.key in [pygame.K_ESCAPE]:
-                        newEvent = ProgramQuitEvent()
-                    elif event.key in [pygame.K_UP]:
-                        newEvent = CharacterMoveRequest('UP')
-                if newEvent:
-                    self.eventManager.post(newEvent)
-
-
-
-class PygameView():
-    def __init__(self, eventManager):
-        self.eventManager = eventManager
-        self.eventManager.register_listener(self)
-
-        pygame.init()
-        self.screen = pygame.display.set_mode((800, 640))
-        pygame.display.set_caption('Dude! if you can see this, its working!!!')
-        self.background = pygame.Surface(self.screen.get_size())
-        self.background.fill((120,235,22))
-        self.screen.blit(self.background, (0,0))
-        pygame.display.flip()
-
-        self.character_sprites = pygame.sprite.RenderUpdates()
-
-    def show_character(self, character):
-        characterSprite = CharacterSprite(self.character_sprites)
-        position = character.position
-        characterSprite = position
-
-    def move_character(self, character):
-        characterSprite = self.get_character_sprite(character)
-
-        position = character.position
-        characterSprite.move_to(position)
-
-    def get_character_sprite(self, character):
-        for c in self.character_sprites:
-            return c
-
-    def notify(self, event):
-        if isinstance(event, TickEvent):
-            self.screen.blit(self.background, (0,0))
-            self.character_sprites.update()
-
-            self.character_sprites.draw(self.screen)
-
-            pygame.display.flip()
-
-        elif isinstance(event, CharacterSpawnEvent):
-            self.show_character(event.character)
-
-        elif isinstance(event, CharacterMoveEvent):
-            self.move_character(event.character)
-
-        
-
-            
-        
-        
-        
-
 
 class Character():
     '''the character object'''
@@ -250,7 +124,13 @@ class Character():
 
         elif isinstance(event, CharacterMoveRequest):
             self._move(event.direction)
-            
+
+
+
+copyable_events = {}
+
+server_to_client_events = []
+client_to_server_events = []
 
 ######################## Stuff from network.py
 def MixInClass(origClass, addClass):
@@ -316,6 +196,15 @@ class CopyableCharacterMoveEvent(pb.Copyable, pb.RemoteCopy):
 pb.setUnjellyableForClass(CopyableCharacterMoveEvent, CopyableCharacterMoveEvent)
 server_to_client_events.append(CopyableCharacterMoveEvent)
 
+class CopyableCharacterMoveRequestEvent(pb.Copyable, pb.RemoteCopy):
+    def __init__(self, event, registry):
+        self.name = 'Copyable Character Move Request Event'
+        self.character_id = id(event.character)
+        registry[self.character_id] = event.character
+
+pb.setUnjellyableForClass(CopyableCharacterMoveRequestEvent, CopyableCharacterMoveRequestEvent)
+server_to_client_events.append(CopyableCharacterMoveRequestEvent)
+
 class CopyableCharacterSpawnEvent(pb.Copyable, pb.RemoteCopy):
     def __init__(self, event, registry):
         self.name = 'Copyable Character Spawn Event'
@@ -324,11 +213,152 @@ class CopyableCharacterSpawnEvent(pb.Copyable, pb.RemoteCopy):
 
 pb.setUnjellyableForClass(CopyableCharacterSpawnEvent, CopyableCharacterSpawnEvent)
 server_to_client_events.append(CopyableCharacterSpawnEvent)
+
+copyable_events['CopyableGameStartedEvent'] = CopyableGameStartedEvent
+copyable_events['CopyableCharacterMoveEvent'] = CopyableCharacterMoveEvent
+copyable_events['CopyableCharacterMoveRequestEvent'] = CopyableCharacterMoveRequestEvent
+copyable_events['CopyableCharacterSpawnEvent'] = CopyableCharacterSpawnEvent
+
+
+class EventManager():
+    '''super class event manager'''
+    def __init__(self):
+        from weakref import WeakKeyDictionary
+        self.listeners = WeakKeyDictionary()
+        self.event_queue = []
+
+    def register_listener(self, listener):
+        self.listeners[listener] = True
+
+    def unregister_listener(self, listener):
+        if listener in self.listeners:
+            del self.listeners[listener]
+    def post(self, event):
+        self.event_queue.append(event)
+        if isinstance(event, TickEvent):
+            self._process_event_queue()
+        else:
+            pass
+
+    def _process_event_queue(self):
+        # goes through all the events and sends them to the listeners
+        event_number = 0
+        while event_number < len(self.event_queue):
+            event = self.event_queue[event_number]
+            for listener in self.listeners:
+                listener.notify(event)
+            event_number += 1
+        # empty the queue
+        self.event_queue = []
+
+
+
+################### stuff from serverneeds.py (aka example1.py)
+
+class CPUSpinnerController():
+    def __init__(self, eventManager):
+        self.eventManager = eventManager
+        self.eventManager.register_listener(self)
+        self.running = True
+
+    def run(self):
+        while self.running:
+            newEvent = TickEvent()
+            self.eventManager.post(newEvent)
+
+    def notify(self, event):
+        if isinstance(event, ProgramQuitEvent):
+            self.running = False
+
+class KeyboardController():
+    def __init__(self, eventManager):
+        self.eventManager = eventManager
+        self.eventManager.register_listener(self)
+
+    def notify(self, event):
+        if isinstance(event, TickEvent):
+            #go through the user input
+            for event in pygame.event.get():
+                newEvent = None
+                if event.type == QUIT:
+                    newEvent = ProgramQuitEvent()
+                elif event.type == KEYDOWN:
+                    if event.key in [pygame.K_ESCAPE]:
+                        newEvent = ProgramQuitEvent()
+                    elif event.key in [pygame.K_UP]:
+                        newEvent = CharacterMoveRequestEvent('UP')
+                if newEvent:
+                    self.eventManager.post(newEvent)
+
+
+class CharacterSprite(pygame.sprite.Sprite):
+    def __init__(self, group=None):
+        pygame.sprite.Sprite.__init__(self, group)
+        self.image = pygame.image.load(os.path.join('resources','character.png'))
+        self.image.convert()
+        self.rect = self.image.get_rect()
+
+        self.move_to = None # position to move to during update
+
+    def update(self):
+        #set the position to our new move to
+        if self.move_to:
+            self.rect.center = self.move_to
+            self.move_to = None
+
+
+class PygameView():
+    def __init__(self, eventManager):
+        self.eventManager = eventManager
+        self.eventManager.register_listener(self)
+
+        pygame.init()
+        self.screen = pygame.display.set_mode((800, 640))
+        pygame.display.set_caption('Dude! if you can see this, its working!!!')
+        self.background = pygame.Surface(self.screen.get_size())
+        self.background.fill((120,235,22))
+        self.screen.blit(self.background, (0,0))
+        pygame.display.flip()
+
+        self.character_sprites = pygame.sprite.RenderUpdates()
+
+    def show_character(self, character):
+        characterSprite = CharacterSprite(self.character_sprites)
+        position = character.position
+        characterSprite = position
+
+    def move_character(self, character):
+        characterSprite = self.get_character_sprite(character)
+
+        position = character.position
+        characterSprite.move_to(position)
+
+    def get_character_sprite(self, character):
+        for c in self.character_sprites:
+            return c
+
+    def notify(self, event):
+        if isinstance(event, TickEvent):
+            self.screen.blit(self.background, (0,0))
+            self.character_sprites.update()
+
+            self.character_sprites.draw(self.screen)
+
+            pygame.display.flip()
+
+        elif isinstance(event, CharacterSpawnEvent):
+            self.show_character(event.character)
+
+        elif isinstance(event, CharacterMoveEvent):
+            self.move_character(event.character)
+
+            
         
 ######################################
 
         
 class NetworkServerView(pb.Root):
+    ''' Used to send events to the Server'''
 
     def __init__(self, eventManager, shared_object_registry):
         self.eventManager = eventManager
@@ -342,7 +372,7 @@ class NetworkServerView(pb.Root):
         self.shared_objects = shared_object_registry
 
     def attempt_connection(self):
-        print 'Attempting connection'
+        print 'Attempting connection...'
         self.state = 'CONNECTING'
         if self.reactor:
             self.reactor.stop()
@@ -387,17 +417,18 @@ class NetworkServerView(pb.Root):
             elif self.state in ['CONNECTED', 'DISCONNECTING', 'CONNECTING']:
                 self.pump_reactor()
             return
-
+                
         if isinstance(event, ProgramQuitEvent):
             self.disconnect()
             return
 
         if not isinstance(event, pb.Copyable):
+            print 'not a copyable event:' + str(event)
             event_name = event.__class__.__name__
             copyable_class_name = 'Copyable' + event_name
-            if not hasattr(network, copyable_class_name):
+            if not copyable_class_name in copyable_events:
                 return
-            copyableClass = getattr(network, copyable_class_name)
+            copyableClass = copyable_events[copyable_class_name]
             event = copyableClass(event, self.shared_objects)
 
         if event.__class__ not in client_to_server_events:
@@ -412,104 +443,20 @@ class NetworkServerView(pb.Root):
 
 
 class NetworkServerController(pb.Referenceable):
-    '''events are recieved from the network through this controller'''
+    '''Recieves events from the Server'''
     def __init__(self, eventManager):
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
 
-    def remote_ServerEvent(self, event):
-        print 'dude!!! whhoooeeee we got an event:', str(event)
+    def remote_RecieveEvent(self, event):
+        # the server calls this function to send an event
+        print 'Event recieved:', str(event)
         self.eventManager.post(event)
         return True
 
     def notify(self, event):
         if isinstance(event, ServerConnectEvent):
             event.server.callRemote('ClientConnect', self)
-
-class PhonyEventManager(EventManager):
-    def post(self, event):
-        pass
-
-class PhonyModel(object):
-    ''' model used to store the local state and to interact with
-    the local Event Manager
-    '''
-    def __init__(self, eventManager, shared_object_registry):
-        self.shared_objects = shared_object_registry
-        self.game = None #HAHAHAHA NO GHAME FOR YOU! UP YOURS!
-        self.server = None
-        self.phonyEventManager = PhonyEventManager()
-        self.realEventManager = eventManager
-        self.realEventManager.register_listener(self)
-
-    def StateReturned(self, response):
-        if response[0] == False:
-            print 'response[0] is false, uh, dude...'
-            return None
-        object_ids = response[0]
-        object_dictionary = response[1]
-        the_object = self.shared_objects[object_id]
-
-        retval = the_object.setCopyableState(object_dictionary, self.shared_objects)
-        if retval[0] == True:
-            return the_object
-        for remaining_object_id in retval[1]:
-            remoteResponse = self.server.callRemote('GetObjectState', remaining_object_id)
-            remoteResponse.addCallback(self.StateReturned)
-
-        retval = obj.setCopyableState(object_dictionary, self.shared_objects)
-        if retval[0] == False:
-            print 'ummm why is that wierd? i dont know, but it is.'
-            return None
-
-        return the_object
-
-    def notify(self, event):
-        if isinstance(event, ServerConnectEvent):
-            self.server = event.server
-        elif isinstance(event, CopyableGameStartedEvent):
-            game_id = event.game_id
-            if not self.game:
-                self.game = Game(self.phonyEventManager)
-                self.shared_objects[game_id] = self.game
-                
-            print 'sending the thing to the real em'
-            newEvent = GameStartedEvent(self.game)
-            self.realEventManager.post(newEvent)
-
-
-        if isinstance(event, CopyableCharacterSpawnEvent):
-            character_id = event.character_id
-            if self.shared_objects.has_key(character_id):
-                character = self.shared_objects[character_id]
-                newEvent = CharacterPlaceEvent(character)
-                self.realEventManager.post(event)
-            else:
-                character = self.game.players[0].characters[0]
-                self.shared_objects[character_id] = character
-                remoteResponse = self.server.callRemote('GetObjectState', character_id)
-                remoteResponse.addCallback(self.StateReturned)
-                remoteResponse.addCallback(self.CharacterSpawnCallback)
-
-        if isinstance(event, CopyableCharacterMoveEvent):
-            character_id = event.character_id
-            if self.shared_objects.has_key(character_id):
-                character = self.shared_objects[character_id]
-            else:
-                character = self.game.players[0].characters[0]
-                self.shared_objects[character_id] = character
-            remoteResponse = self.server.callRemote('GetObjectState', character_id)
-            remoteResponse.addCallback(self.StateReturned)
-            remoteResponse.addCallback(self.CharacterMoveRequestCallback)
-            
-
-    def CharacterSpawnCallback(self, character):
-        newEvent = CharacterSpawnEvent(character)
-        self.realEventManager.post(event)
-
-    def CharacterMoveCallback(self, character):
-        newEvent = CharacterMoveEvent(character)
-        self.realEventManager.post(event)
 
 def main():
     print '############################################'
@@ -525,16 +472,14 @@ def main():
 
     pygameView = PygameView(eventManager)
 
-    phonyModel = PhonyModel(eventManager, shared_object_registry)
-
     serverController = NetworkServerController(eventManager)
     serverView = NetworkServerView(eventManager, shared_object_registry)
 
-    print 'Loading Complete!'
+    print '...Loading Complete!'
     print 'Running Program...'
     spinnerController.run()
-    print 'running complete'
-    print eventManager.event
+    print '...running complete'
 
 if __name__ == '__main__':
     main()
+    pygame.quit()
