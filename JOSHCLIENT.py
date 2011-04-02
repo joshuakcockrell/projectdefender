@@ -5,6 +5,8 @@ from twisted.spread import pb
 from twisted.internet.selectreactor import SelectReactor
 from twisted.internet.main import installReactor
 
+from weakref import WeakKeyDictionary
+
 
 class Event():
     '''
@@ -222,7 +224,6 @@ copyable_events['CopyableCharacterSpawnEvent'] = CopyableCharacterSpawnEvent
 class EventManager():
     '''super class event manager'''
     def __init__(self):
-        from weakref import WeakKeyDictionary
         self.listeners = WeakKeyDictionary()
         self.event_queue = []
 

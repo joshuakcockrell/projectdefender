@@ -1,5 +1,8 @@
 from twisted.spread import pb
 from twisted.internet import protocol
+from twisted.internet import reactor
+
+from weakref import WeakKeyDictionary
 
 class Event():
     '''
@@ -95,7 +98,7 @@ class Character():
         self.positionY = None
         self.position = (self.positionX, self.positionY)
         self.speed = 5
-        self.state = 'INACTIVE'
+        self.state = 'ACTIVE'
 
     def _move(self, direction):
         if self.state == 'INACTIVE':
@@ -104,15 +107,7 @@ class Character():
         newEvent = CharacterMoveEvent(self)
         self.eventManager.post(newEvent)
 
-    def _spawn(self, position):
-        self.position = position
-        self.state = 'ACTIVE'
-        newEvent = CharacterSpawnEvent(self)
-        self.eventManager.post(newEvent)
-
     def notify(self, event):
-        if isinstance(event, GameStartedEvent):
-            self._spawn((100,100))
 
         elif isinstance(event, CharacterMoveRequestEvent):
             self._move(event.direction)
@@ -217,7 +212,6 @@ copyable_events['CopyableCharacterSpawnEvent'] = CopyableCharacterSpawnEvent
 class EventManager():
     '''super class event manager'''
     def __init__(self):
-        from weakref import WeakKeyDictionary
         self.listeners = WeakKeyDictionary()
         self.event_queue = []
 
@@ -405,8 +399,6 @@ def main():
     clientController = NetworkClientController(eventManager, shared_object_registry)
     clientView = NetworkClientView(eventManager, shared_object_registry)
     game = Game(eventManager)
-
-    from twisted.internet import reactor
 
    
     
