@@ -1,7 +1,6 @@
 from twisted.spread import pb
 from twisted.internet import protocol
 
-
 class Event():
     '''
     superclass for events
@@ -86,6 +85,133 @@ class ClientConnectEvent(Event):
         self.name = 'Client Connect Event'
         self.client = client
 
+class Character():
+    '''the character object'''
+    def __init__(self, eventManager):
+        self.eventManager = eventManager
+        self.eventManager.register_listener(self)
+
+        self.positionX = None
+        self.positionY = None
+        self.position = (self.positionX, self.positionY)
+        self.speed = 5
+        self.state = 'INACTIVE'
+
+    def _move(self, direction):
+        if self.state == 'INACTIVE':
+            return
+        self.positionX += self.speed
+        newEvent = CharacterMoveEvent(self)
+        self.eventManager.post(newEvent)
+
+    def _spawn(self, position):
+        self.position = position
+        self.state = 'ACTIVE'
+        newEvent = CharacterSpawnEvent(self)
+        self.eventManager.post(newEvent)
+
+    def notify(self, event):
+        if isinstance(event, GameStartedEvent):
+            self._spawn((100,100))
+
+        elif isinstance(event, CharacterMoveRequestEvent):
+            self._move(event.direction)
+
+
+
+copyable_events = {}
+
+server_to_client_events = []
+client_to_server_events = []
+
+######################## Stuff from network.py
+def MixInClass(origClass, addClass):
+    if addClass not in origClass.__bases__:
+        origClass.__bases__ += (addClass,)
+
+def MixInCopyClasses(someClass):
+    MixInClass(someClass, pb.Copyable)
+    MixInClass(someClass, pb.RemoteCopy)
+
+class CopyableCharacter():
+    def get_state_to_copy(self):
+        dictionary = self.__dict__.copy()
+        del d['eventManager']
+        dictionary['position'] = id(self.position)
+        return dictionary
+
+    def set_copyable_state(self, state_dictionary, registry):
+        needed_object_ids = []
+        sucess = True
+        if not registry.has_key(state_dictionary['position']):
+            needed_object_ids.append(state_dictionary['position'])
+            sucess = False
+        else:
+            self.position = registry[state_dictionary['position']]
+        return [sucess, needed_object_ids]
+
+MixInClass(Character, CopyableCharacter)
+
+
+# mixing in the copy classes here
+#client to server
+MixInCopyClasses(ProgramQuitEvent)
+pb.setUnjellyableForClass(ProgramQuitEvent, ProgramQuitEvent)
+client_to_server_events.append(ProgramQuitEvent)
+
+#client to server
+MixInCopyClasses(GameStartRequestEvent)
+pb.setUnjellyableForClass(GameStartRequestEvent, GameStartRequestEvent)
+client_to_server_events.append(GameStartRequestEvent)
+
+#client to server
+MixInCopyClasses(CharacterMoveRequestEvent)
+pb.setUnjellyableForClass(CharacterMoveRequestEvent,CharacterMoveRequestEvent)
+client_to_server_events.append(CharacterMoveRequestEvent)
+
+class CopyableGameStartedEvent(pb.Copyable, pb.RemoteCopy):
+    '''server to client only'''
+    def __init__(self, event, registry):
+        self.name = 'Copyable Game Started Event'
+        self.game_id = id(event.game)
+        registry[self.game_id] = event.game
+
+pb.setUnjellyableForClass(CopyableGameStartedEvent, CopyableGameStartedEvent)
+server_to_client_events.append(CopyableGameStartedEvent)
+
+class CopyableCharacterMoveEvent(pb.Copyable, pb.RemoteCopy):
+    def __init__(self, event, registry):
+        self.name = 'Copyable Character Move Event'
+        self.character_id = id(event.character)
+        registry[self.character_id] = event.character
+
+pb.setUnjellyableForClass(CopyableCharacterMoveEvent, CopyableCharacterMoveEvent)
+server_to_client_events.append(CopyableCharacterMoveEvent)
+
+class CopyableCharacterMoveRequestEvent(pb.Copyable, pb.RemoteCopy):
+    def __init__(self, event, registry):
+        self.name = 'Copyable Character Move Request Event'
+        self.character_id = id(event.character)
+        registry[self.character_id] = event.character
+
+pb.setUnjellyableForClass(CopyableCharacterMoveRequestEvent, CopyableCharacterMoveRequestEvent)
+server_to_client_events.append(CopyableCharacterMoveRequestEvent)
+
+class CopyableCharacterSpawnEvent(pb.Copyable, pb.RemoteCopy):
+    def __init__(self, event, registry):
+        self.name = 'Copyable Character Spawn Event'
+        self.character_id = id(event.character)
+        registry[self.character_id] = event.character
+
+pb.setUnjellyableForClass(CopyableCharacterSpawnEvent, CopyableCharacterSpawnEvent)
+server_to_client_events.append(CopyableCharacterSpawnEvent)
+
+copyable_events['CopyableGameStartedEvent'] = CopyableGameStartedEvent
+copyable_events['CopyableCharacterMoveEvent'] = CopyableCharacterMoveEvent
+copyable_events['CopyableCharacterMoveRequestEvent'] = CopyableCharacterMoveRequestEvent
+copyable_events['CopyableCharacterSpawnEvent'] = CopyableCharacterSpawnEvent
+
+
 
 
 class EventManager():
@@ -102,12 +228,12 @@ class EventManager():
         if listener in self.listeners:
             del self.listeners[listener]
     def post(self, event):
-        self.eventQueue.append(event)
+        self.event_queue.append(event)
         if isinstance(event, TickEvent):
             self._process_event_queue()
         else:
-            print event.name
-
+            pass
+        
     def _process_event_queue(self):
         # goes through all the events and sends them to the listeners
         event_number = 0
@@ -132,38 +258,11 @@ class ServerEventManager(EventManager):
 
     def post(self, event):
         EventManager.post(self, event)
-        if not self._lock:
-            self._lock = True
+        if not self._locked:
+            self._locked = True
             self._process_event_queue()
-            self._lock = False
-
-class NetworkClientController(pb.Root):
-    '''gets events from the network'''
-    def __init__(self, eventManager, shared_object_registry):
-        self.eventManager = eventManager
-        self.eventManager.register_listener(self)
-        self.shared_objects = shared_object_registry
-
-    def remote_ClientConnect(self, netClient):
-        new_event = ClientConnectEvent(netClient)
-        self.eventManager.post(new_event)
-
-    def remote_GetObjectState(self, objectID):
-        if not self.shared_objects.has_key(objectID):
-            return [0,0] # WHAAA?
-        object_dict = self.shared_objects[objectID].get_state_to_copy()
-        return [objectID, object_dict]
-
-    def remote_EventOverNetwork(self, event):
-        # server gets an event
-        self.eventManager.post(event)
-        return True
-
-    def notify(self, event):
-        # do nothing when notified
-        pass
-
-
+            self._locked = False
+            
 class TextLogView(object):
     def __init__(self, eventManager):
         self.eventManager = eventManager
@@ -173,8 +272,30 @@ class TextLogView(object):
         if isinstance(event, TickEvent):
             return
 
-        print event.name, event
+        pass
+    
 
+class NetworkClientController(pb.Root):
+    '''gets events from the network'''
+    def __init__(self, eventManager, shared_object_registry):
+        self.eventManager = eventManager
+        self.eventManager.register_listener(self)
+        self.shared_objects = shared_object_registry
+
+    def remote_ClientConnect(self, client):
+        # client calls this function to connect sends self as param
+        new_event = ClientConnectEvent(client)
+        self.eventManager.post(new_event)
+
+    def remote_EventOverNetwork(self, event):
+        # server gets an event
+        print 'recieved a event from the network:'+ str(event)
+        self.eventManager.post(event)
+        return True
+
+    def notify(self, event):
+        # do nothing when notified
+        pass
 
 class NetworkClientView(object):
     '''used to send events to clients'''
@@ -194,18 +315,17 @@ class NetworkClientView(object):
         if not isinstance(testing_event, pb.Copyable):
             event_name = testing_event.__class__.__name__
             copyable_class_name = 'Copyable' + event_name
-            if not hasattr(network, copyable_class_name):
+            if copyable_class_name not in copyable_events:
                 return
-            copyable_class = getattr(network, copyable_class_name)
+            copyable_class = copyable_events[copyable_class_name]
             testing_event = copyableClass(testing_event, self.shared_objects)
-
-        if testing_event.__class__ not in network.serverToClientEvents:
+        if testing_event.__class__ not in server_to_client_events:
             # not gonna send that
             return
 
         for c in self.clients:
             print 'Sending Event: ' + str(testing_event)
-            remoteCall = client.callRemote('ServerEvent', testing_event)
+            remoteCall = client.callRemote('RecieveEvent', testing_event)
 
 class Player():
     '''A person playing the game'''
@@ -214,18 +334,28 @@ class Player():
 
         self.characters = [Character(eventManager)]
 
-class Character():
+class CharacterState():
     '''Game State object that holds Character Logic
     (not visuals or user input)
     '''
     def __init__(self, eventManager):
+        print 'creating a character'
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
 
         self.position = (300, 300)
 
     def notify(self, event):
-        pass
+        if isinstance(event, TickEvent):
+            pass
+        
+        if isinstance(event, CharacterMoveRequestEvent):
+            print 'someone wants to move!!!'
+            self.position[0] -= 5
+            new_event = CharacterMoveEvent()
+            self.eventManager.post(new_event)
+            
+    
 
 class Game():
     def __init__(self, eventManager):
@@ -236,12 +366,25 @@ class Game():
 
         self.players = [Player(eventManager)]
 
+        self.characters = []
+
     def start(self):
+        print 'starting'
+        #pre game loop loading stuff
+
+        #spawn a character
+        character = CharacterState(self.eventManager)
+        self.characters.append(character)
+        
+        
         self.state = 'RUNNING'
-        new_event = GameStatedEvent(self)
+        new_event = GameStartedEvent(self)
         self.eventManager.post(new_event)
 
     def notify(self, event):
+        print 'okay'
+        print event
+        print 'got event aasdfasdfasdf'
         if isinstance(event, GameStartRequestEvent):
             if self.state == 'RUNNING':
                 self.start()
@@ -269,8 +412,8 @@ def main():
     
     reactor.listenTCP(24100, pb.PBServerFactory(clientController))
 
-    print 'Loading Complete!'
-    print 'Running PRogram...'
+    print '...Loading Complete!'
+    print 'Running Program...'
     reactor.run()
 
 
