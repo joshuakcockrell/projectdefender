@@ -57,9 +57,10 @@ class CharacterMoveEvent(Event):
     '''
     when a character moves
     '''
-    def __init__(self, character):
+    def __init__(self, character, position):
         self.name = 'Character Move Event'
         self.character = character
+        self.position = position
 
 class CharacterSpawnEvent(Event):
     '''
@@ -88,30 +89,30 @@ class ClientConnectEvent(Event):
         self.name = 'Client Connect Event'
         self.client = client
 
-class Character():
-    '''the character object'''
-    def __init__(self, eventManager):
-        self.eventManager = eventManager
-        self.eventManager.register_listener(self)
-
-        self.positionX = None
-        self.positionY = None
-        self.position = (self.positionX, self.positionY)
-        self.speed = 5
-        self.state = 'ACTIVE'
-
-    def _move(self, direction):
-        if self.state == 'INACTIVE':
-            return
-        self.positionX += self.speed
-        newEvent = CharacterMoveEvent(self)
-        self.eventManager.post(newEvent)
-
-    def notify(self, event):
-
-        elif isinstance(event, CharacterMoveRequestEvent):
-            self._move(event.direction)
-
+##class Character():
+##    '''the character object'''
+##    def __init__(self, eventManager):
+##        self.eventManager = eventManager
+##        self.eventManager.register_listener(self)
+##
+##        self.positionX = None
+##        self.positionY = None
+##        self.position = (self.positionX, self.positionY)
+##        self.speed = 5
+##        self.state = 'ACTIVE'
+##
+##    def _move(self, direction):
+##        if self.state == 'INACTIVE':
+##            return
+##        self.positionX += self.speed
+##        newEvent = CharacterMoveEvent(self)
+##        self.eventManager.post(newEvent)
+##
+##    def notify(self, event):
+##
+##        if isinstance(event, CharacterMoveRequestEvent):
+##            self._move(event.direction)
+##
 
 
 copyable_events = {}
@@ -128,24 +129,24 @@ def MixInCopyClasses(someClass):
     MixInClass(someClass, pb.Copyable)
     MixInClass(someClass, pb.RemoteCopy)
 
-class CopyableCharacter():
-    def get_state_to_copy(self):
-        dictionary = self.__dict__.copy()
-        del d['eventManager']
-        dictionary['position'] = id(self.position)
-        return dictionary
-
-    def set_copyable_state(self, state_dictionary, registry):
-        needed_object_ids = []
-        sucess = True
-        if not registry.has_key(state_dictionary['position']):
-            needed_object_ids.append(state_dictionary['position'])
-            sucess = False
-        else:
-            self.position = registry[state_dictionary['position']]
-        return [sucess, needed_object_ids]
-
-MixInClass(Character, CopyableCharacter)
+##class CopyableCharacter():
+##    def get_state_to_copy(self):
+##        dictionary = self.__dict__.copy()
+##        del d['eventManager']
+##        dictionary['position'] = id(self.position)
+##        return dictionary
+##
+##    def set_copyable_state(self, state_dictionary, registry):
+##        needed_object_ids = []
+##        sucess = True
+##        if not registry.has_key(state_dictionary['position']):
+##            needed_object_ids.append(state_dictionary['position'])
+##            sucess = False
+##        else:
+##            self.position = registry[state_dictionary['position']]
+##        return [sucess, needed_object_ids]
+##
+#MixInClass(Character, CopyableCharacter)
 
 
 # mixing in the copy classes here
@@ -283,7 +284,6 @@ class NetworkClientController(pb.Root):
 
     def remote_EventOverNetwork(self, event):
         # server gets an event
-        print 'recieved a event from the network:'+ str(event)
         self.eventManager.post(event)
         return True
 
@@ -312,7 +312,7 @@ class NetworkClientView(object):
             if copyable_class_name not in copyable_events:
                 return
             copyable_class = copyable_events[copyable_class_name]
-            testing_event = copyableClass(testing_event, self.shared_objects)
+            testing_event = copyable_class(testing_event, self.shared_objects)
         if testing_event.__class__ not in server_to_client_events:
             # not gonna send that
             return
@@ -321,33 +321,37 @@ class NetworkClientView(object):
             print 'Sending Event: ' + str(testing_event)
             remoteCall = client.callRemote('RecieveEvent', testing_event)
 
-class Player():
-    '''A person playing the game'''
-    def __init__(self, eventManager):
-        self.eventManager = eventManager
-
-        self.characters = [Character(eventManager)]
+##class Player():
+##    '''A person playing the game'''
+##    def __init__(self, eventManager):
+##        self.eventManager = eventManager
+##
+##        self.characters = [Character(eventManager)]
 
 class CharacterState():
     '''Game State object that holds Character Logic
     (not visuals or user input)
     '''
     def __init__(self, eventManager):
-        print 'creating a character'
+
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
+        
+        self.positionX = 300
+        self.positionY = 300
+        self.position = [self.positionX, self.positionY]
 
-        self.position = (300, 300)
+    def move(self, direction):
+        print 'the character is moving in ' + str(direction)
+
+        if direction == 'UP':
+            self.positionY -= 5
+            self.position = [self.positionX, self.positionY]
+            newEvent = CharacterMoveEvent(self, self.position)
+            self.eventManager.post(newEvent)
 
     def notify(self, event):
-        if isinstance(event, TickEvent):
-            pass
-        
-        if isinstance(event, CharacterMoveRequestEvent):
-            print 'someone wants to move!!!'
-            self.position[0] -= 5
-            new_event = CharacterMoveEvent()
-            self.eventManager.post(new_event)
+        pass
             
     
 
@@ -358,9 +362,11 @@ class Game():
 
         self.state = 'PREPARING'
 
-        self.players = [Player(eventManager)]
+        #self.players = [Player(eventManager)]
 
         self.characters = []
+        characterState = CharacterState(self.eventManager)
+        self.characters.append(characterState)
 
     def start(self):
         print 'starting'
@@ -376,13 +382,14 @@ class Game():
         self.eventManager.post(new_event)
 
     def notify(self, event):
-        print 'okay'
-        print event
-        print 'got event aasdfasdfasdf'
+        print 'game class got event ' + str(event)
         if isinstance(event, GameStartRequestEvent):
             if self.state == 'RUNNING':
                 self.start()
-    
+
+        if isinstance(event, CharacterMoveRequestEvent):
+            for c in self.characters:
+                c.move(event.direction)
 
 
             
