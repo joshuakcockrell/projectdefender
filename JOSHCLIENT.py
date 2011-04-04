@@ -353,6 +353,7 @@ class CPUSpinnerController():
 
     def run(self):
         while self.running:
+            pygame.display.set_caption(str(self.clock.get_fps()))
             self.clock.tick(self.FPS)
             newEvent = TickEvent()
             self.eventManager.post(newEvent)
@@ -434,6 +435,7 @@ class PygameView():
         self.background.fill((120,235,22))
         self.screen.blit(self.background, (0,0))
         pygame.display.flip()
+        self.clock = pygame.time.Clock()
         
         self.character_sprites = pygame.sprite.RenderUpdates()
 
