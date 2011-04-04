@@ -177,6 +177,7 @@ server_to_client_events.append(CopyableGameStartedEvent)
 
 class CopyableCharacterMoveEvent(pb.Copyable, pb.RemoteCopy):
     def __init__(self, event, registry):
+        self.position = event.position # position to place character
         self.name = 'Copyable Character Move Event'
         self.character_id = id(event.character)
         registry[self.character_id] = event.character
@@ -284,6 +285,7 @@ class NetworkClientController(pb.Root):
 
     def remote_EventOverNetwork(self, event):
         # server gets an event
+        #print 'Event recieved: ' + str(event.name)
         self.eventManager.post(event)
         return True
 
@@ -316,10 +318,10 @@ class NetworkClientView(object):
         if testing_event.__class__ not in server_to_client_events:
             # not gonna send that
             return
-
+        
+        #print 'Sending Event: ' + str(testing_event.name)
         for c in self.clients:
-            print 'Sending Event: ' + str(testing_event)
-            remoteCall = client.callRemote('RecieveEvent', testing_event)
+            remoteCall = c.callRemote('RecieveEvent', testing_event)
 
 ##class Player():
 ##    '''A person playing the game'''
@@ -336,19 +338,42 @@ class CharacterState():
 
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
-        
+
+        self.movement_speed = 5
         self.positionX = 300
         self.positionY = 300
         self.position = [self.positionX, self.positionY]
 
     def move(self, direction):
-        print 'the character is moving in ' + str(direction)
+        #print 'the character is moving in ' + str(direction)
 
+        # move in given direction
         if direction == 'UP':
-            self.positionY -= 5
-            self.position = [self.positionX, self.positionY]
-            newEvent = CharacterMoveEvent(self, self.position)
-            self.eventManager.post(newEvent)
+            self.positionY -= self.movement_speed
+        elif direction == 'DOWN':
+            self.positionY += self.movement_speed
+        elif direction == 'LEFT':
+            self.positionX -= self.movement_speed
+        elif direction == 'RIGHT':
+            self.positionX += self.movement_speed
+
+        # diagonal movement
+        elif direction == 'LEFTUP':
+            self.positionX -= (self.movement_speed * .707)
+            self.positionY -= (self.movement_speed * .707)
+        elif direction == 'RIGHTUP':
+            self.positionX += (self.movement_speed * .707)
+            self.positionY -= (self.movement_speed * .707)
+        elif direction == 'LEFTDOWN':
+            self.positionX -= (self.movement_speed * .707)
+            self.positionY += (self.movement_speed * .707)
+        elif direction == 'RIGHTDOWN':
+            self.positionX += (self.movement_speed * .707)
+            self.positionY += (self.movement_speed * .707)
+
+        self.position = [self.positionX, self.positionY]
+        newEvent = CharacterMoveEvent(self, self.position)
+        self.eventManager.post(newEvent)
 
     def notify(self, event):
         pass
@@ -369,7 +394,7 @@ class Game():
         self.characters.append(characterState)
 
     def start(self):
-        print 'starting'
+        print 'Starting Game...'
         #pre game loop loading stuff
 
         #spawn a character
@@ -382,7 +407,6 @@ class Game():
         self.eventManager.post(new_event)
 
     def notify(self, event):
-        print 'game class got event ' + str(event)
         if isinstance(event, GameStartRequestEvent):
             if self.state == 'RUNNING':
                 self.start()

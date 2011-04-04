@@ -54,7 +54,7 @@ class CharacterMoveRequestEvent(Event):
     when a character moves in a direction
     '''
     def __init__(self, direction):
-        self.name = 'Character Move Request'
+        self.name = 'Character Move Request Event'
         self.direction = direction
 
 class CharacterMoveEvent(Event):
@@ -182,9 +182,12 @@ server_to_client_events.append(CopyableGameStartedEvent)
 
 class CopyableCharacterMoveEvent(pb.Copyable, pb.RemoteCopy):
     def __init__(self, event, registry):
+        print 'CREATING AN EVENT DUDEEEEEEEEEEEEEEEEEEEE'
+        print event
         self.name = 'Copyable Character Move Event'
         self.character_id = id(event.character)
         registry[self.character_id] = event.character
+        self.position = event.position # position to move to
 
 pb.setUnjellyableForClass(CopyableCharacterMoveEvent, CopyableCharacterMoveEvent)
 server_to_client_events.append(CopyableCharacterMoveEvent)
@@ -198,19 +201,10 @@ class CopyableCharacterMoveRequestEvent(pb.Copyable, pb.RemoteCopy):
 pb.setUnjellyableForClass(CopyableCharacterMoveRequestEvent, CopyableCharacterMoveRequestEvent)
 server_to_client_events.append(CopyableCharacterMoveRequestEvent)
 
-class CopyableCharacterSpawnEvent(pb.Copyable, pb.RemoteCopy):
-    def __init__(self, event, registry):
-        self.name = 'Copyable Character Spawn Event'
-        self.character_id = id(event.character)
-        registry[self.character_id] = event.character
-
-pb.setUnjellyableForClass(CopyableCharacterSpawnEvent, CopyableCharacterSpawnEvent)
-server_to_client_events.append(CopyableCharacterSpawnEvent)
-
+# add the keys and classes to the copyable_events dictionary
 copyable_events['CopyableGameStartedEvent'] = CopyableGameStartedEvent
 copyable_events['CopyableCharacterMoveEvent'] = CopyableCharacterMoveEvent
 copyable_events['CopyableCharacterMoveRequestEvent'] = CopyableCharacterMoveRequestEvent
-copyable_events['CopyableCharacterSpawnEvent'] = CopyableCharacterSpawnEvent
 
 
 class EventManager():
@@ -325,7 +319,7 @@ class NetworkServerView(pb.Root):
             return
 
         if self.server:
-            print 'client sending', str(event)
+            #print 'Client sending: ', str(event.name)
             remoteCall = self.server.callRemote('EventOverNetwork', event)
 
         else:
@@ -340,7 +334,7 @@ class NetworkServerController(pb.Referenceable):
 
     def remote_RecieveEvent(self, event):
         # the server calls this function to send an event
-        print 'Event recieved:', str(event)
+        #print 'Event recieved from server:', str(event.name)
         self.eventManager.post(event)
         return True
 
@@ -352,10 +346,14 @@ class CPUSpinnerController():
     def __init__(self, eventManager):
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
+        self.clock = pygame.time.Clock() # create a clock
+        self.FPS = 40
+
         self.running = True
 
     def run(self):
         while self.running:
+            self.clock.tick(self.FPS)
             newEvent = TickEvent()
             self.eventManager.post(newEvent)
 
@@ -364,6 +362,7 @@ class CPUSpinnerController():
             self.running = False
 
 class KeyboardController():
+    ''' gets user input from the mouse and keyboard'''
     def __init__(self, eventManager):
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
@@ -378,15 +377,37 @@ class KeyboardController():
                 elif event.type == KEYDOWN:
                     if event.key in [pygame.K_ESCAPE]:
                         newEvent = ProgramQuitEvent()
-                    elif event.key in [pygame.K_UP]:
-                        newEvent = CharacterMoveRequestEvent('UP')
                 if newEvent:
                     self.eventManager.post(newEvent)
+
+            #getting arrow key movement
+            pressed = pygame.key.get_pressed()
+            directionX = pressed[K_d] - pressed[K_a]
+            directionY = pressed[K_s] - pressed[K_w]
+            
+            # ready the direction details
+            text_directionX = ''
+            text_directionY = ''
+            text_direction = ''
+            
+            if directionX == -1:
+                text_directionX = 'LEFT'
+            elif directionX == 1:
+                text_directionX = 'RIGHT'
+            if directionY == -1:
+                text_directionY = 'UP'
+            elif directionY == 1:
+                text_directionY = 'DOWN'
+                
+            text_direction = text_directionX + text_directionY # put direction into a string
+            if text_direction:# if the user pressed a direction
+                #print text_direction
+                newEvent = CharacterMoveRequestEvent(text_direction) #create event
+                self.eventManager.post(newEvent) # send it
 
 
 class CharacterSprite(pygame.sprite.Sprite):
     def __init__(self, group=None):
-        print 'created'
         pygame.sprite.Sprite.__init__(self, group)
         self.image = pygame.image.load(os.path.join('resources','character.png'))
         self.image.convert()
@@ -398,7 +419,6 @@ class CharacterSprite(pygame.sprite.Sprite):
     def set_position(self, position):
         self.position = position
     def update(self):
-        #set the position to our new move to
         self.rect.center = self.position
 
 
@@ -419,11 +439,9 @@ class PygameView():
 
         characterSprite = CharacterSprite(self.character_sprites)
 
-    def move_character(self, character):
-        characterSprite = self.get_character_sprite(character)
-
-        position = character.position
-        characterSprite.move_to(position)
+    def move_character(self, position):
+        for c in self.character_sprites:
+            c.set_position(position)
 
     def get_character_sprite(self, character):
         for c in self.character_sprites:
@@ -439,8 +457,8 @@ class PygameView():
             pygame.display.flip()
 
 
-        elif isinstance(event, CharacterMoveEvent):
-            self.move_character(event.character)
+        elif isinstance(event, CopyableCharacterMoveEvent):
+            self.move_character(event.position)
 
             
 
