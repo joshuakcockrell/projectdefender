@@ -25,6 +25,18 @@ class ProgramQuitEvent(Event):
     def __init__(self):
         self.name = 'Program Quit Event'
 
+class CompleteGameStateEvent(Event):
+    '''
+    Holds the  visual info for every
+    object in the game
+    '''
+    # example of game state list
+    # [['OBJECT NAME', id, [position]], object2, object3
+    # [['CHARACTER', 19376408, [300, 300]], ['CHARACTER', 19377248, [300, 300]]]
+    def __init__(self, game_state_list):
+        self.name = 'Complete Game State Event'
+        self.game_state = game_state_list
+
 class MapLoadedEvent(Event):
     '''
     after the map has been created
@@ -57,10 +69,21 @@ class CharacterMoveEvent(Event):
     '''
     when a character moves
     '''
-    def __init__(self, character, position):
+    def __init__(self, character_id, position):
         self.name = 'Character Move Event'
-        self.character = character
+        self.character_id = character_id # get the id of the character
         self.position = position
+
+class NewCharacterSpriteEvent(Event):
+    '''
+    when a new character sprite is being created by the
+    character object state
+    '''
+    def __init__(self, character, character_id, character_position):
+        self.name = 'New Character Sprite Event'
+        self.character = character
+        self.character_id = character_id # get the id of the character
+        self.character_position = character_position
 
 class CharacterSpawnEvent(Event):
     '''
@@ -167,44 +190,67 @@ client_to_server_events.append(CharacterMoveRequestEvent)
 
 class CopyableGameStartedEvent(pb.Copyable, pb.RemoteCopy):
     '''server to client only'''
-    def __init__(self, event, registry):
+    def __init__(self, event, object_registry):
         self.name = 'Copyable Game Started Event'
         self.game_id = id(event.game)
-        registry[self.game_id] = event.game
+        object_registry[self.game_id] = event.game
 
 pb.setUnjellyableForClass(CopyableGameStartedEvent, CopyableGameStartedEvent)
 server_to_client_events.append(CopyableGameStartedEvent)
 
+class CopyableCompleteGameStateEvent(pb.Copyable, pb.RemoteCopy):
+    '''server to client only'''
+    def __init__(self, event, object_registry):
+        self.name = 'Copyable Complete Game State Event'
+        self.game_state = event.game_state
+
+pb.setUnjellyableForClass(CopyableCompleteGameStateEvent, CopyableCompleteGameStateEvent)
+server_to_client_events.append(CopyableCompleteGameStateEvent)
+
 class CopyableCharacterMoveEvent(pb.Copyable, pb.RemoteCopy):
-    def __init__(self, event, registry):
+    '''We dont send the actual character'''
+    def __init__(self, event, object_registry):
         self.position = event.position # position to place character
         self.name = 'Copyable Character Move Event'
-        self.character_id = id(event.character)
-        registry[self.character_id] = event.character
+        self.character_id = event.character_id
 
 pb.setUnjellyableForClass(CopyableCharacterMoveEvent, CopyableCharacterMoveEvent)
 server_to_client_events.append(CopyableCharacterMoveEvent)
 
+class CopyableNewCharacterSpriteEvent(pb.Copyable, pb.RemoteCopy):
+    '''We dont send the actual character'''
+    def __init__(self, event, object_registry):
+        self.name = 'Copyable New Character Sprite Event'
+        self.character_id = event.character_id
+        object_registry[self.character_id] = event.character
+        self.character_position = event.character_position
+
+
+pb.setUnjellyableForClass(CopyableNewCharacterSpriteEvent, CopyableNewCharacterSpriteEvent)
+server_to_client_events.append(CopyableNewCharacterSpriteEvent)
+
 class CopyableCharacterMoveRequestEvent(pb.Copyable, pb.RemoteCopy):
-    def __init__(self, event, registry):
+    def __init__(self, event, object_registry):
         self.name = 'Copyable Character Move Request Event'
         self.character_id = id(event.character)
-        registry[self.character_id] = event.character
+        object_registry[self.character_id] = event.character
 
 pb.setUnjellyableForClass(CopyableCharacterMoveRequestEvent, CopyableCharacterMoveRequestEvent)
 server_to_client_events.append(CopyableCharacterMoveRequestEvent)
 
 class CopyableCharacterSpawnEvent(pb.Copyable, pb.RemoteCopy):
-    def __init__(self, event, registry):
+    def __init__(self, event, object_registry):
         self.name = 'Copyable Character Spawn Event'
         self.character_id = id(event.character)
-        registry[self.character_id] = event.character
+        object_registry[self.character_id] = event.character
 
 pb.setUnjellyableForClass(CopyableCharacterSpawnEvent, CopyableCharacterSpawnEvent)
 server_to_client_events.append(CopyableCharacterSpawnEvent)
 
 copyable_events['CopyableGameStartedEvent'] = CopyableGameStartedEvent
+copyable_events['CopyableCompleteGameStateEvent'] = CopyableCompleteGameStateEvent
 copyable_events['CopyableCharacterMoveEvent'] = CopyableCharacterMoveEvent
+copyable_events['CopyableNewCharacterSpriteEvent'] = CopyableNewCharacterSpriteEvent
 copyable_events['CopyableCharacterMoveRequestEvent'] = CopyableCharacterMoveRequestEvent
 copyable_events['CopyableCharacterSpawnEvent'] = CopyableCharacterSpawnEvent
 
@@ -215,9 +261,28 @@ class EventManager():
     '''super class event manager'''
     def __init__(self):
         self.listeners = WeakKeyDictionary()
+        self.pending_listeners = WeakKeyDictionary()
         self.event_queue = []
 
+    def process_pending_listeners(self):
+        '''
+        New listeners are added to the listeners list
+        in a seperate loop than the post event fuction
+        to avoid changing the list of listeners as we
+        are iterating through it
+        ( which we do in _process_event_queue() )
+        '''
+        for listener in self.pending_listeners:
+            self.listeners[listener] = True
+        self.pending_listeners = WeakKeyDictionary() # empty the list
+
     def register_listener(self, listener):
+        self.pending_listeners[listener] = True
+
+    def register_pre_listener(self, listener):
+        '''
+        Registers starting listeners
+        '''
         self.listeners[listener] = True
 
     def unregister_listener(self, listener):
@@ -226,6 +291,7 @@ class EventManager():
     def post(self, event):
         self.event_queue.append(event)
         if isinstance(event, TickEvent):
+            self.process_pending_listeners() # update the lister list
             self._process_event_queue()
         else:
             pass
@@ -262,7 +328,7 @@ class ServerEventManager(EventManager):
 class TextLogView(object):
     def __init__(self, eventManager):
         self.eventManager = eventManager
-        self.eventManager.register_listener(self)
+        self.eventManager.register_pre_listener(self)
 
     def notify(self, event):
         if isinstance(event, TickEvent):
@@ -275,7 +341,7 @@ class NetworkClientController(pb.Root):
     '''gets events from the network'''
     def __init__(self, eventManager, shared_object_registry):
         self.eventManager = eventManager
-        self.eventManager.register_listener(self)
+        self.eventManager.register_pre_listener(self)
         self.shared_objects = shared_object_registry
 
     def remote_ClientConnect(self, client):
@@ -295,11 +361,11 @@ class NetworkClientController(pb.Root):
 
 class NetworkClientView(object):
     '''used to send events to clients'''
-    def __init__(self, eventManager, shared_object_registry):
+    def __init__(self, eventManager, object_registry):
         self.eventManager = eventManager
-        self.eventManager.register_listener(self)
+        self.eventManager.register_pre_listener(self)
         self.clients = []
-        self.shared_objects = shared_object_registry
+        self.object_registry = object_registry
 
     def notify(self, event):
         if isinstance(event, ClientConnectEvent):
@@ -314,7 +380,7 @@ class NetworkClientView(object):
             if copyable_class_name not in copyable_events:
                 return
             copyable_class = copyable_events[copyable_class_name]
-            testing_event = copyable_class(testing_event, self.shared_objects)
+            testing_event = copyable_class(testing_event, self.object_registry)
         if testing_event.__class__ not in server_to_client_events:
             # not gonna send that
             return
@@ -336,6 +402,9 @@ class CharacterState():
     '''
     def __init__(self, eventManager):
 
+
+        self.object_type = 'CHARACTER'
+        self.id = None
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
 
@@ -343,7 +412,17 @@ class CharacterState():
         self.positionX = 300
         self.positionY = 300
         self.position = [self.positionX, self.positionY]
+        
+    def set_id(self, new_id):
+        self.id = new_id
 
+    def create_character_sprite(self):
+        '''Called during character creation
+            Creates a new event which creates a character sprite on
+            the client side, also links the id'''
+        newEvent = NewCharacterSpriteEvent(self, self.id, self.position)
+        self.eventManager.post(newEvent)
+        
     def move(self, direction):
         #print 'the character is moving in ' + str(direction)
 
@@ -372,7 +451,7 @@ class CharacterState():
             self.positionY += (self.movement_speed * .707)
 
         self.position = [self.positionX, self.positionY]
-        newEvent = CharacterMoveEvent(self, self.position)
+        newEvent = CharacterMoveEvent(self.id, self.position)
         self.eventManager.post(newEvent)
 
     def notify(self, event):
@@ -381,39 +460,61 @@ class CharacterState():
     
 
 class Game():
-    def __init__(self, eventManager):
+    def __init__(self, eventManager, object_registry):
         self.eventManager = eventManager
-        self.eventManager.register_listener(self)
+        self.eventManager.register_pre_listener(self)
 
         self.state = 'PREPARING'
 
         #self.players = [Player(eventManager)]
-
+        self.object_ids = [] # holds the ids for all the objects
+        self.object_registry = object_registry #holds the objects and their id
         self.characters = []
-        characterState = CharacterState(self.eventManager)
-        self.characters.append(characterState)
-
+                
     def start(self):
         print 'Starting Game...'
         #pre game loop loading stuff
-
-        #spawn a character
-        character = CharacterState(self.eventManager)
-        self.characters.append(character)
-        
         
         self.state = 'RUNNING'
         new_event = GameStartedEvent(self)
         self.eventManager.post(new_event)
 
+    def _create_new_character(self):
+        #spawn a character
+        character = CharacterState(self.eventManager) # create a character
+        character_id = id(character) # get the id
+        character.set_id(character_id) # set the id
+        character.create_character_sprite() # create a sprite to represent the character
+
+        #add to groups
+        self.object_registry[character_id] = character
+        self.characters.append(character)
+        self.object_ids.append(character_id)
+
+    def _send_complete_game_state(self):
+        game_objects_info = []
+        for object_id in self.object_ids:
+            current_object = self.object_registry[object_id]
+            print current_object.position
+            game_objects_info.append([current_object.object_type, current_object.id, current_object.position])
+        print 'THE GAME OBJECTS'
+        newEvent = CompleteGameStateEvent(game_objects_info)
+        self.eventManager.post(newEvent)
     def notify(self, event):
+        
         if isinstance(event, GameStartRequestEvent):
             if self.state == 'RUNNING':
                 self.start()
+                
+        if event.name == 'Client Connect Event':
+            self._send_complete_game_state()
+            self._create_new_character()
+
 
         if isinstance(event, CharacterMoveRequestEvent):
-            for c in self.characters:
-                c.move(event.direction)
+            # get the correct character
+            character_to_move = self.object_registry[event.character_id]
+            character_to_move.move(event.direction)
 
 
             
@@ -425,11 +526,11 @@ def main():
     print 'Loading...'
     
     eventManager = ServerEventManager()
-    shared_object_registry = {}
+    object_registry = {}
     log = TextLogView(eventManager)
-    clientController = NetworkClientController(eventManager, shared_object_registry)
-    clientView = NetworkClientView(eventManager, shared_object_registry)
-    game = Game(eventManager)
+    clientController = NetworkClientController(eventManager, object_registry)
+    clientView = NetworkClientView(eventManager, object_registry)
+    game = Game(eventManager, object_registry)
 
    
     
