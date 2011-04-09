@@ -1,8 +1,14 @@
+import math
+
 from twisted.spread import pb
 from twisted.internet import protocol
 from twisted.internet import reactor
 
 from weakref import WeakKeyDictionary
+
+
+###############################################################################
+# EVENTS
 
 class Event():
     '''
@@ -64,26 +70,16 @@ class CharacterMoveRequestEvent(Event):
     def __init__(self, direction):
         self.name = 'Character Move Request'
         self.direction = direction
-
-class CharacterMoveEvent(Event):
+        
+class CreateProjectileRequestEvent(Event):
     '''
-    when a character moves
+    when the character clicks down to shoot a
+    projectile
     '''
-    def __init__(self, character_id, position):
-        self.name = 'Character Move Event'
-        self.character_id = character_id # get the id of the character
-        self.position = position
-
-class NewCharacterSpriteEvent(Event):
-    '''
-    when a new character sprite is being created by the
-    character object state
-    '''
-    def __init__(self, character, character_id, character_position):
-        self.name = 'New Character Sprite Event'
-        self.character = character
-        self.character_id = character_id # get the id of the character
-        self.character_position = character_position
+    def __init__(self, starting_position, target_position):
+        self.name = 'Create Projectile Request Event'
+        self.starting_position = starting_position
+        self.target_position = target_position
 
 class CharacterSpawnEvent(Event):
     '''
@@ -112,38 +108,12 @@ class ClientConnectEvent(Event):
         self.name = 'Client Connect Event'
         self.client = client
 
-##class Character():
-##    '''the character object'''
-##    def __init__(self, eventManager):
-##        self.eventManager = eventManager
-##        self.eventManager.register_listener(self)
-##
-##        self.positionX = None
-##        self.positionY = None
-##        self.position = (self.positionX, self.positionY)
-##        self.speed = 5
-##        self.state = 'ACTIVE'
-##
-##    def _move(self, direction):
-##        if self.state == 'INACTIVE':
-##            return
-##        self.positionX += self.speed
-##        newEvent = CharacterMoveEvent(self)
-##        self.eventManager.post(newEvent)
-##
-##    def notify(self, event):
-##
-##        if isinstance(event, CharacterMoveRequestEvent):
-##            self._move(event.direction)
-##
-
 
 copyable_events = {}
 
 server_to_client_events = []
 client_to_server_events = []
 
-######################## Stuff from network.py
 def MixInClass(origClass, addClass):
     if addClass not in origClass.__bases__:
         origClass.__bases__ += (addClass,)
@@ -151,25 +121,6 @@ def MixInClass(origClass, addClass):
 def MixInCopyClasses(someClass):
     MixInClass(someClass, pb.Copyable)
     MixInClass(someClass, pb.RemoteCopy)
-
-##class CopyableCharacter():
-##    def get_state_to_copy(self):
-##        dictionary = self.__dict__.copy()
-##        del d['eventManager']
-##        dictionary['position'] = id(self.position)
-##        return dictionary
-##
-##    def set_copyable_state(self, state_dictionary, registry):
-##        needed_object_ids = []
-##        sucess = True
-##        if not registry.has_key(state_dictionary['position']):
-##            needed_object_ids.append(state_dictionary['position'])
-##            sucess = False
-##        else:
-##            self.position = registry[state_dictionary['position']]
-##        return [sucess, needed_object_ids]
-##
-#MixInClass(Character, CopyableCharacter)
 
 
 # mixing in the copy classes here
@@ -185,8 +136,9 @@ client_to_server_events.append(GameStartRequestEvent)
 
 #client to server
 MixInCopyClasses(CharacterMoveRequestEvent)
-pb.setUnjellyableForClass(CharacterMoveRequestEvent,CharacterMoveRequestEvent)
+pb.setUnjellyableForClass(CharacterMoveRequestEvent, CharacterMoveRequestEvent)
 client_to_server_events.append(CharacterMoveRequestEvent)
+
 
 class CopyableGameStartedEvent(pb.Copyable, pb.RemoteCopy):
     '''server to client only'''
@@ -207,28 +159,6 @@ class CopyableCompleteGameStateEvent(pb.Copyable, pb.RemoteCopy):
 pb.setUnjellyableForClass(CopyableCompleteGameStateEvent, CopyableCompleteGameStateEvent)
 server_to_client_events.append(CopyableCompleteGameStateEvent)
 
-class CopyableCharacterMoveEvent(pb.Copyable, pb.RemoteCopy):
-    '''We dont send the actual character'''
-    def __init__(self, event, object_registry):
-        self.position = event.position # position to place character
-        self.name = 'Copyable Character Move Event'
-        self.character_id = event.character_id
-
-pb.setUnjellyableForClass(CopyableCharacterMoveEvent, CopyableCharacterMoveEvent)
-server_to_client_events.append(CopyableCharacterMoveEvent)
-
-class CopyableNewCharacterSpriteEvent(pb.Copyable, pb.RemoteCopy):
-    '''We dont send the actual character'''
-    def __init__(self, event, object_registry):
-        self.name = 'Copyable New Character Sprite Event'
-        self.character_id = event.character_id
-        object_registry[self.character_id] = event.character
-        self.character_position = event.character_position
-
-
-pb.setUnjellyableForClass(CopyableNewCharacterSpriteEvent, CopyableNewCharacterSpriteEvent)
-server_to_client_events.append(CopyableNewCharacterSpriteEvent)
-
 class CopyableCharacterMoveRequestEvent(pb.Copyable, pb.RemoteCopy):
     def __init__(self, event, object_registry):
         self.name = 'Copyable Character Move Request Event'
@@ -236,7 +166,7 @@ class CopyableCharacterMoveRequestEvent(pb.Copyable, pb.RemoteCopy):
         object_registry[self.character_id] = event.character
 
 pb.setUnjellyableForClass(CopyableCharacterMoveRequestEvent, CopyableCharacterMoveRequestEvent)
-server_to_client_events.append(CopyableCharacterMoveRequestEvent)
+client_to_server_events.append(CopyableCharacterMoveRequestEvent)
 
 class CopyableCharacterSpawnEvent(pb.Copyable, pb.RemoteCopy):
     def __init__(self, event, object_registry):
@@ -247,15 +177,24 @@ class CopyableCharacterSpawnEvent(pb.Copyable, pb.RemoteCopy):
 pb.setUnjellyableForClass(CopyableCharacterSpawnEvent, CopyableCharacterSpawnEvent)
 server_to_client_events.append(CopyableCharacterSpawnEvent)
 
+class CopyableCreateProjectileRequestEvent(pb.Copyable, pb.RemoteCopy):
+    '''
+    when the character clicks down to shoot a
+    projectile
+    '''
+    def __init__(self, event, object_registry):
+        self.name = 'Copyable Create Projectile Request Event'
+        self.starting_position = event.starting_position
+        self.target_position = event.target_position
+
+pb.setUnjellyableForClass(CopyableCreateProjectileRequestEvent, CopyableCreateProjectileRequestEvent)
+client_to_server_events.append(CopyableCreateProjectileRequestEvent)
+
 copyable_events['CopyableGameStartedEvent'] = CopyableGameStartedEvent
 copyable_events['CopyableCompleteGameStateEvent'] = CopyableCompleteGameStateEvent
-copyable_events['CopyableCharacterMoveEvent'] = CopyableCharacterMoveEvent
-copyable_events['CopyableNewCharacterSpriteEvent'] = CopyableNewCharacterSpriteEvent
 copyable_events['CopyableCharacterMoveRequestEvent'] = CopyableCharacterMoveRequestEvent
 copyable_events['CopyableCharacterSpawnEvent'] = CopyableCharacterSpawnEvent
-
-
-
+copyable_events['CopyableCreateProjectileRequestEvent'] = CopyableCreateProjectileRequestEvent
 
 class EventManager():
     '''super class event manager'''
@@ -308,7 +247,6 @@ class EventManager():
         self.event_queue = []
         
 
-
 class ServerEventManager(EventManager):
     '''subclass of event manager that doesn't wait for a Tick event to start
     processing the event queue (the server doesnt use Tick events)
@@ -324,18 +262,39 @@ class ServerEventManager(EventManager):
             self._locked = True
             self._process_event_queue()
             self._locked = False
-            
-class TextLogView(object):
+        
+
+###############################################################################
+# SERVER NETWORK CONTROLLERS
+
+
+
+class FrameRateTicker():
+    '''
+    sends events to the event manager to update all event listeners
+    '''
     def __init__(self, eventManager):
         self.eventManager = eventManager
-        self.eventManager.register_pre_listener(self)
+        self.eventManager.register_listener(self)
+
+        self.FPS = 40
+        self.running = True
+        self.run()
+
+    def run(self):
+        newEvent = TickEvent()
+        self.eventManager.post(newEvent)
+        # call this function again
+        if self.running == True:
+            reactor.callLater((1 / self.FPS), self.run)
+        else:
+            pass
+
 
     def notify(self, event):
-        if isinstance(event, TickEvent):
-            return
-
-        pass
-    
+        if isinstance(event, ProgramQuitEvent): # if we got a quit program event
+            self.running = False
+            
 
 class NetworkClientController(pb.Root):
     '''gets events from the network'''
@@ -368,6 +327,11 @@ class NetworkClientView(object):
         self.object_registry = object_registry
 
     def notify(self, event):
+
+        if event.name == 'Tick Event':
+            # ticks dont get sent
+            return
+        
         if isinstance(event, ClientConnectEvent):
             # if a client wants to connect
             self.clients.append(event.client)
@@ -379,30 +343,76 @@ class NetworkClientView(object):
             copyable_class_name = 'Copyable' + event_name
             if copyable_class_name not in copyable_events:
                 return
+            
             copyable_class = copyable_events[copyable_class_name]
             testing_event = copyable_class(testing_event, self.object_registry)
-        if testing_event.__class__ not in server_to_client_events:
-            # not gonna send that
-            return
+        else:
+            pass
         
-        #print 'Sending Event: ' + str(testing_event.name)
-        for c in self.clients:
-            remoteCall = c.callRemote('RecieveEvent', testing_event)
+        # see if the event is in our list of things we can send          
+        if testing_event.__class__ in server_to_client_events:
+            for c in self.clients:
+                remoteCall = c.callRemote('RecieveEvent', testing_event)
+        else:
+            pass
 
-##class Player():
-##    '''A person playing the game'''
-##    def __init__(self, eventManager):
-##        self.eventManager = eventManager
-##
-##        self.characters = [Character(eventManager)]
 
-class CharacterState():
+###############################################################################
+# SERVER GAME STATE OBJECTS
+
+class Vector():
+    '''
+    Class:
+        creates operations to handle vectors such
+        as direction, position, and speed
+    '''
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __str__(self): # used for printing vectors
+        return "(%s, %s)"%(self.x, self.y)
+
+    def __getitem__(self, key):
+        if key == 0:
+            return self.x
+        elif key == 1:
+            return self.y
+        else:
+            raise IndexError("This "+str(key)+" key is not a vector key!")
+
+    def __sub__(self, o): # subtraction
+        return Vector(self.x - o.x, self.y - o.y)
+
+    def length(self): # get length (used for normalize)
+        return math.sqrt((self.x**2 + self.y**2)) 
+
+    def normalize(self): # divides a vector by its length
+        l = self.length()
+        if l != 0:
+            return (self.x / l, self.y / l)
+        return None
+
+
+class GameStateObject():
+    def __init__(self):
+        self.object_name = ''
+        self.id = None
+        self.eventManager = None
+        
+    def update(self):
+        pass
+
+
+class CharacterState(GameStateObject):
     '''Game State object that holds Character Logic
     (not visuals or user input)
     '''
     def __init__(self, eventManager):
+        GameStateObject.__init__(self)
 
-
+        self.position_has_changed = False
+        
         self.object_type = 'CHARACTER'
         self.id = None
         self.eventManager = eventManager
@@ -412,16 +422,25 @@ class CharacterState():
         self.positionX = 300
         self.positionY = 300
         self.position = [self.positionX, self.positionY]
+
+        self.position_has_changed = True
         
     def set_id(self, new_id):
         self.id = new_id
 
-    def create_character_sprite(self):
-        '''Called during character creation
-            Creates a new event which creates a character sprite on
-            the client side, also links the id'''
-        newEvent = NewCharacterSpriteEvent(self, self.id, self.position)
-        self.eventManager.post(newEvent)
+    def state_has_changed(self):
+        #checks if the velocity has changed for package_info
+        if self.position_has_changed == True:
+            self.position_has_changed = False
+            return True
+        else:
+            return False
+
+    def package_info(self):
+        # send info to the _send_complete_game_state function
+        # to be sent to the clients as an update
+        if self.id: # if we have an id already
+            return [self.object_type, self.id, self.position, None]
         
     def move(self, direction):
         #print 'the character is moving in ' + str(direction)
@@ -451,15 +470,83 @@ class CharacterState():
             self.positionY += (self.movement_speed * .707)
 
         self.position = [self.positionX, self.positionY]
-        newEvent = CharacterMoveEvent(self.id, self.position)
-        self.eventManager.post(newEvent)
+        self.position_has_changed = True
 
     def notify(self, event):
         pass
+
+    def update(self):
+        pass
+
+class ProjectileState(GameStateObject):
+    '''
+    Game State object that holds project Logic
+    (not visuals or user input)
+    '''
+    def __init__(self, eventManager, starting_position, target_position):
+        GameStateObject.__init__(self)
+
+        self.velocity_has_changed = False
+        self.object_type = 'PROJECTILE'
+        self.id = None
+        self.eventManager = eventManager
+        self.eventManager.register_listener(self)
+
+        self.movement_speed = 5
+        self.positionX = starting_position[0]
+        self.positionY = starting_position[1]
+        self.position = [self.positionX, self.positionY]
+        
+        self.target_positionX = target_position[0]
+        self.target_positionY = target_position[1]
+        self.target_position = [self.target_positionX, self.target_positionY]
+
+        self.direction = None
+        self.direction = self.get_direction()
+        
+        self.velocity_has_changed = True
+
+    def set_id(self, new_id):
+        self.id = new_id
+
+    def state_has_changed(self):
+        #checks if the velocity has changed for package_info
+        if self.velocity_has_changed == True:
+            self.velocity_has_changed = False
+            return True
+        else:
+            return False
             
-    
+    def package_info(self):
+        # send info to the _send_complete_game_state function
+        # to be sent to the clients as an update
+        if self.id: # if we have an id already
+            return [self.object_type, self.id, self.position,
+                    ((self.direction[0] * self.movement_speed),
+                    (self.direction[1] * self.movement_speed))] # send stuff
+
+    def get_direction(self):
+        if self.target_position: # if the square has a target
+            position = Vector(self.positionX, self.positionY) # create a vector from center x,y value
+            target = Vector(self.target_positionX, self.target_positionY) # and one from the target x,y
+            self.distance = target - position # get total distance between target and position
+
+            direction = self.distance.normalize() # normalize so its constant in all directions
+            return direction
+
+    def notify(self, event):
+        pass
+
+    def update(self):
+        self.positionX += (self.direction[0] * self.movement_speed) # calculate speed from direction to move and speed constant
+        self.positionY += (self.direction[1] * self.movement_speed)
+        self.position = (round(self.positionX),round(self.positionY)) # apply values to object position
 
 class Game():
+    '''
+    Controlls game state objects
+    such as character, projectile etc...
+    '''
     def __init__(self, eventManager, object_registry):
         self.eventManager = eventManager
         self.eventManager.register_pre_listener(self)
@@ -470,6 +557,8 @@ class Game():
         self.object_ids = [] # holds the ids for all the objects
         self.object_registry = object_registry #holds the objects and their id
         self.characters = []
+        self.projectiles = []
+        self.all_objects = []
                 
     def start(self):
         print 'Starting Game...'
@@ -484,23 +573,46 @@ class Game():
         character = CharacterState(self.eventManager) # create a character
         character_id = id(character) # get the id
         character.set_id(character_id) # set the id
-        character.create_character_sprite() # create a sprite to represent the character
 
         #add to groups
         self.object_registry[character_id] = character
+        self.all_objects.append(character)
         self.characters.append(character)
         self.object_ids.append(character_id)
+
+    def _create_new_projectile(self, starting_position, target_position):
+        projectile = ProjectileState(self.eventManager, starting_position, target_position)
+        projectile_id = id(projectile)
+        projectile.set_id(projectile_id)
+
+        #add to groups
+        self.object_registry[projectile_id] = projectile
+        self.all_objects.append(projectile)
+        self.projectiles.append(projectile)
+        self.object_ids.append(projectile_id)
 
     def _send_complete_game_state(self):
         game_objects_info = []
         for object_id in self.object_ids:
             current_object = self.object_registry[object_id]
-            print current_object.position
-            game_objects_info.append([current_object.object_type, current_object.id, current_object.position])
-        print 'THE GAME OBJECTS'
-        newEvent = CompleteGameStateEvent(game_objects_info)
-        self.eventManager.post(newEvent)
+            current_object_info = current_object.package_info()
+            if current_object.state_has_changed():
+                game_objects_info.append(current_object_info)
+
+        if game_objects_info == None: # if its none
+            print 'its noneEEEEE'
+            pass
+        else:
+            print game_objects_info
+            newEvent = CompleteGameStateEvent(game_objects_info)
+            self.eventManager.post(newEvent)
     def notify(self, event):
+
+        if event.name == 'Tick Event':
+            #update all the objects
+            for o in self.all_objects:
+                o.update()
+            self._send_complete_game_state()
         
         if isinstance(event, GameStartRequestEvent):
             if self.state == 'RUNNING':
@@ -510,13 +622,13 @@ class Game():
             self._send_complete_game_state()
             self._create_new_character()
 
-
-        if isinstance(event, CharacterMoveRequestEvent):
+        if event.name == 'Copyable Character Move Request Event':
             # get the correct character
             character_to_move = self.object_registry[event.character_id]
             character_to_move.move(event.direction)
 
-
+        elif event.name == 'Copyable Create Projectile Request Event':
+            self._create_new_projectile(event.starting_position, event.target_position)
             
 
 def main():
@@ -526,13 +638,12 @@ def main():
     print 'Loading...'
     
     eventManager = ServerEventManager()
+    frameRateTicker = FrameRateTicker(eventManager)
     object_registry = {}
-    log = TextLogView(eventManager)
     clientController = NetworkClientController(eventManager, object_registry)
     clientView = NetworkClientView(eventManager, object_registry)
     game = Game(eventManager, object_registry)
 
-   
     
     reactor.listenTCP(24100, pb.PBServerFactory(clientController))
 
@@ -542,4 +653,6 @@ def main():
 
 
 if __name__ == '__main__':
+    #import cProfile
+    #cProfile.run('main()')
     main()
