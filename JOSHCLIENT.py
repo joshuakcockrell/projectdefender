@@ -1,4 +1,5 @@
 import os
+import time
 import pygame
 from pygame.locals import *
 from twisted.spread import pb
@@ -19,8 +20,16 @@ class TickEvent(Event):
     '''
     frame rate tick
     '''
-    def __init__(self):
+    def __init__(self, delta_time):
         self.name = 'Tick Event'
+        self.delta_time = delta_time
+
+class RenderEvent(Event):
+    '''
+    render the screen
+    '''
+    def __init__(self):
+        self.name = 'Render Event'
 
 class ProgramQuitEvent(Event):
     '''
@@ -76,10 +85,11 @@ class CreateProjectileRequestEvent(Event):
     when the character clicks down to shoot a
     projectile
     '''
-    def __init__(self, starting_position, target_position):
+    def __init__(self, starting_position, target_position, emitter_id):
         self.name = 'Create Projectile Request Event'
         self.starting_position = starting_position
         self.target_position = target_position
+        self.emitter_id = emitter_id
 
 class ServerConnectEvent(Event):
     def __init__(self, serverReference):
@@ -119,6 +129,11 @@ pb.setUnjellyableForClass(GameStartRequestEvent, GameStartRequestEvent)
 client_to_server_events.append(GameStartRequestEvent)
 
 
+class CopyableProgramQuitEvent(pb.Copyable, pb.RemoteCopy):
+    '''client to server only'''
+    def __init__(self, event, object_registry):
+        self.name = 'Copyable Program Quit Event'
+        
 class CopyableGameStartedEvent(pb.Copyable, pb.RemoteCopy):
     '''server to client only'''
     def __init__(self, event, object_registry):
@@ -156,6 +171,7 @@ class CopyableCreateProjectileRequestEvent(pb.Copyable, pb.RemoteCopy):
         self.name = 'Copyable Create Projectile Request Event'
         self.starting_position = event.starting_position
         self.target_position = event.target_position
+        self.emitter_id = event.emitter_id
 
 pb.setUnjellyableForClass(CopyableCreateProjectileRequestEvent, CopyableCreateProjectileRequestEvent)
 client_to_server_events.append(CopyableCreateProjectileRequestEvent)
@@ -306,11 +322,26 @@ class NetworkServerController(pb.Referenceable):
             event.server.callRemote('ClientConnect', self)
 
 class CPUSpinnerController():
+    '''
+    sends events to the event manager to update all event listeners
+    uses python time.time() to get the delta time.
+    The delta time (change in time since the last current time) is
+    sent to the TickEvent. Different parts of the program use delta
+    time to determine how far ahead it needs to step
+    (this is used especially in the game physics)
+    '''
     def __init__(self, eventManager):
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
         self.clock = pygame.time.Clock() # create a clock
+        
+        self.program_time = 0.0
+        self.initial_time = time.time()
+        self.current_time = self.initial_time
+        self.delta_time = 0.01 # not sure why .01
+        self.extra_time_accumulator = self.delta_time
         self.FPS = 40
+        self.minimum_FPS = 4
 
         self.running = True
 
@@ -318,12 +349,30 @@ class CPUSpinnerController():
         while self.running:
             pygame.display.set_caption(str(self.clock.get_fps()))
             self.clock.tick(self.FPS)
-            newEvent = TickEvent()
+            
+            self.last_time = self.current_time # set last time
+            self.current_time = time.time() # get current time
+            self.delta_time =  self.current_time - self.last_time # get delta time
+            if self.delta_time > (1.0 / self.minimum_FPS):
+                delta_time = (1.0 / self.minimum_FPS)
+                
+            self.extra_time_accumulator += self.delta_time
+
+            while self.extra_time_accumulator >= self.delta_time:
+                newEvent = TickEvent(self.delta_time)
+                self.program_time += self.delta_time
+                self.extra_time_accumulator -= self.delta_time
+                newEvent = TickEvent(self.delta_time)
+                self.eventManager.post(newEvent)
+
+            newEvent = RenderEvent()
             self.eventManager.post(newEvent)
 
     def notify(self, event):
         if isinstance(event, ProgramQuitEvent):
             self.running = False
+
+################################################################################
 
 class KeyboardController():
     ''' gets user input from the mouse and keyboard'''
@@ -382,12 +431,22 @@ class KeyboardController():
                 self.eventManager.post(newEvent)
 
 class CharacterSprite(pygame.sprite.Sprite):
-    def __init__(self, character_id, position, velocity, group=None):
+    def __init__(self, character_id, position, velocity, object_state, group=None):
         pygame.sprite.Sprite.__init__(self, group)
         self.id = character_id
+
+        self.state = object_state
+
+        self.images = {} # dict to hold images
+        self.alive_image = pygame.image.load(os.path.join('resources','character.png'))
+        self.alive_image.convert()
+        self.dead_image = pygame.image.load(os.path.join('resources','character_dead.png'))
+        self.dead_image.convert()
         
-        self.image = pygame.image.load(os.path.join('resources','character.png'))
-        self.image.convert()
+        self.images['ALIVE'] = self.alive_image
+        self.images['DEAD'] = self.dead_image
+        
+        self.image = self.images[self.state]
         self.rect = self.image.get_rect()
 
         self.position = None # position to move to during update
@@ -399,16 +458,38 @@ class CharacterSprite(pygame.sprite.Sprite):
     def set_velocity(self, velocity):
         self.velocity = velocity
 
-    def update(self):
-        self.rect.center = self.position
+    def set_state(self, state):
+        self.state = state
+
+    def update(self, delta_time):
+        # if were already using the correct image
+        if self.image == self.images[self.state]:
+            pass
+        else:
+            # use the correct image
+            self.image = self.images[self.state]
+            self.rect = self.image.get_rect()
+        # set the position
+        self.rect.topleft = self.position
 
 class ProjectileSprite(pygame.sprite.Sprite):
-    def __init__(self, projectile_id, position, velocity, group=None):
+    def __init__(self, projectile_id, position, velocity, object_state, group=None):
         pygame.sprite.Sprite.__init__(self, group)
         self.id = projectile_id
+
+        self.object_state = object_state
         
-        self.image = pygame.image.load(os.path.join('resources','bulletblue.png'))
-        self.image.convert()
+        self.images = {}
+        self.image_alive = pygame.image.load(os.path.join('resources','bulletblue.png'))
+        self.image_alive.convert()
+
+        self.image_dead = pygame.image.load(os.path.join('resources','bulletpurple.png'))
+        self.image_dead.convert()
+        
+        self.images['ALIVE'] = self.image_alive
+        self.images['DEAD'] = self.image_dead
+
+        self.image = self.images[self.object_state]
         self.rect = self.image.get_rect()
 
         self.positionX = position[0]
@@ -419,14 +500,24 @@ class ProjectileSprite(pygame.sprite.Sprite):
         self.set_velocity(velocity)
 
     def set_position(self, position):
-        self.rect.center = position
+        self.rect.topleft = position
 
     def set_velocity(self, velocity):
         self.velocity = velocity
+
+    def set_state(self, state):
+        self.object_state = state
         
-    def update(self):
-        self.positionX += self.velocity[0] # calculate speed from direction to move and speed constant
-        self.positionY += self.velocity[1]
+    def update(self, delta_time):
+        print delta_time
+
+        if self.image != self.images[self.object_state]:
+            self.image = self.images[self.object_state]
+            self.rect = self.image.get_rect()
+
+        #print self.positionX
+        self.positionX += (self.velocity[0] * delta_time) # calculate speed from direction to move and speed constant
+        self.positionY += (self.velocity[1] * delta_time)
         self.set_position((round(self.positionX),round(self.positionY))) # apply values to object position
         
 class PygameView():
@@ -436,7 +527,7 @@ class PygameView():
 
         pygame.init()
         self.screen = pygame.display.set_mode((800, 640))
-        pygame.display.set_caption('Dude! if you can see this, its working!!!')
+        pygame.display.set_caption('WELCOME')
         self.background = pygame.Surface(self.screen.get_size())
         self.background.fill((120,235,22))
         self.screen.blit(self.background, (0,0))
@@ -454,6 +545,7 @@ class PygameView():
         self.sprites_dictionary['PROJECTILE'] = self._create_new_projectile_sprite
     
         #create object groups
+        self.all_sprites = []
         self.character_sprites = pygame.sprite.RenderUpdates()
         self.projectile_sprites = pygame.sprite.RenderUpdates()
 
@@ -467,12 +559,14 @@ class PygameView():
             object_id = game_object[1]
             object_position = game_object[2]
             object_velocity = game_object[3]
+            object_state = game_object[4]
 
             # if the object already exists
             if object_id in self.object_registry:
                 current_object = self.object_registry[object_id] # get object
                 current_object.set_position(object_position) # set position
                 current_object.set_velocity(object_velocity)
+                current_object.set_state(object_state)
 
             # if it doesnt exist
             else:
@@ -482,7 +576,7 @@ class PygameView():
                     object_is_user_controlled = True
                 else:
                     object_is_user_controlled = False # not user controlled
-                object_class(object_id, object_position, object_velocity, object_is_user_controlled) # run the create sprite function
+                object_class(object_id, object_position, object_velocity, object_state, object_is_user_controlled) # run the create sprite function
                            
     def _user_wants_to_move_character(self, keyboard_input):
         ''' When the user presses w,a,s, or d:
@@ -499,7 +593,8 @@ class PygameView():
     def _user_wants_to_shoot_projectile(self, target_position):
         if self.user_controlled_character: # if we have a character
             starting_position = self.user_controlled_character.position # get position of character
-            newEvent = CreateProjectileRequestEvent(starting_position, target_position) # create event
+            emitter_id = self.user_controlled_character.id
+            newEvent = CreateProjectileRequestEvent(starting_position, target_position, emitter_id) # create event
             self.eventManager.post(newEvent)
 
     def move_character(self, character_id, position):
@@ -511,26 +606,30 @@ class PygameView():
         for c in self.character_sprites:
             return c
 
-    def _create_new_character_sprite(self, character_id, position, projectile_velocity, object_is_user_controlled):
+    def _create_new_character_sprite(self, character_id, position, projectile_velocity, object_state, object_is_user_controlled):
         #create the new sprite
-        newCharacterSprite = CharacterSprite(character_id, position, projectile_velocity, self.character_sprites)
+        newCharacterSprite = CharacterSprite(character_id, position, projectile_velocity, object_state, self.character_sprites)
+        self.all_sprites.append(newCharacterSprite)
         #assign the registry slot to the character sprite
         self.object_registry[character_id] = newCharacterSprite
         if object_is_user_controlled: # if the character is going to be user controlled
             if not self.user_controlled_character: # if we dont already have a user controlled
                 self.user_controlled_character = newCharacterSprite # set the sprite
 
-    def _create_new_projectile_sprite(self, projectile_id, projectile_position, projectile_velocity, object_is_user_controlled):
-        newProjectileSprite = ProjectileSprite(projectile_id, projectile_position, projectile_velocity, self.projectile_sprites)
+    def _create_new_projectile_sprite(self, projectile_id, projectile_position, projectile_velocity, object_state, object_is_user_controlled):
+        newProjectileSprite = ProjectileSprite(projectile_id, projectile_position, projectile_velocity, object_state, self.projectile_sprites)
+        self.all_sprites.append(newProjectileSprite)
         # assign the registry slot to the projectile sprite
         self.object_registry[projectile_id] = newProjectileSprite
 
     def notify(self, event):
         if isinstance(event, TickEvent):
             self.screen.blit(self.background, (0,0))
-            self.character_sprites.update()
-            self.projectile_sprites.update()
+            delta_time = event.delta_time
+            for s in self.all_sprites:
+                s.update(event.delta_time)
 
+        elif event.name == 'Render Event':
             self.character_sprites.draw(self.screen)
             self.projectile_sprites.draw(self.screen)
 

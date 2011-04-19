@@ -1,4 +1,5 @@
 import math
+import time
 
 from twisted.spread import pb
 from twisted.internet import protocol
@@ -21,8 +22,9 @@ class TickEvent(Event):
     '''
     frame rate tick
     '''
-    def __init__(self):
+    def __init__(self, delta_time):
         self.name = 'Tick Event'
+        self.delta_time = delta_time
 
 class ProgramQuitEvent(Event):
     '''
@@ -37,7 +39,7 @@ class CompleteGameStateEvent(Event):
     object in the game
     '''
     # example of game state list
-    # [['OBJECT NAME', id, [position]], object2, object3
+    # [['OBJECT NAME', id, [position]], object2, object3...
     # [['CHARACTER', 19376408, [300, 300]], ['CHARACTER', 19377248, [300, 300]]]
     def __init__(self, game_state_list):
         self.name = 'Complete Game State Event'
@@ -272,21 +274,45 @@ class ServerEventManager(EventManager):
 class FrameRateTicker():
     '''
     sends events to the event manager to update all event listeners
+    uses python time.time() to get the delta time.
+    The delta time (change in time since the last current time) is
+    sent to the TickEvent. Different parts of the program use delta
+    time to determine how far ahead it needs to step
+    (this is used especially in the game physics)
     '''
     def __init__(self, eventManager):
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
-
+        self.program_time = 0.0
+        self.initial_time = time.time()
+        self.current_time = self.initial_time
+        self.delta_time = 0.01 # not sure why .01
+        self.extra_time_accumulator = self.delta_time
         self.FPS = 40
+        self.minimum_FPS = 4
+        
+        
         self.running = True
         self.run()
 
     def run(self):
-        newEvent = TickEvent()
-        self.eventManager.post(newEvent)
+        self.last_time = self.current_time # set last time
+        self.current_time = time.time() # get current time
+        self.delta_time =  self.current_time - self.last_time # get delta time
+        if self.delta_time > (1.0 / self.minimum_FPS):
+            delta_time = (1.0 / self.minimum_FPS)
+            
+        self.extra_time_accumulator += self.delta_time
+        while self.extra_time_accumulator >= self.delta_time:
+            newEvent = TickEvent(self.delta_time)
+            self.program_time += self.delta_time
+            self.extra_time_accumulator -= self.delta_time
+            newEvent = TickEvent(self.delta_time)
+            self.eventManager.post(newEvent)
+        
         # call this function again
         if self.running == True:
-            reactor.callLater((1 / self.FPS), self.run)
+            reactor.callLater((1.0 / self.FPS), self.run)
         else:
             pass
 
@@ -311,6 +337,8 @@ class NetworkClientController(pb.Root):
     def remote_EventOverNetwork(self, event):
         # server gets an event
         #print 'Event recieved: ' + str(event.name)
+        if event.name == 'Program Quit Event':
+            print event.name
         self.eventManager.post(event)
         return True
 
@@ -335,6 +363,8 @@ class NetworkClientView(object):
         if isinstance(event, ClientConnectEvent):
             # if a client wants to connect
             self.clients.append(event.client)
+            print 'THE CLIENT'
+            print event.client
 
         testing_event = event
         
@@ -359,6 +389,64 @@ class NetworkClientView(object):
 
 ###############################################################################
 # SERVER GAME STATE OBJECTS
+
+class Collision_Tester():
+    '''
+    stores the rectangle dimensions for all of the sprites
+    and tests for collisions between them
+    '''
+    def __init__(self):
+        self.dimensions = {} # holds all the dimensions
+
+        # [width, height]
+        self.character_alive_dimensions = [19, 27]
+
+        self.character_dead_dimensions = [40, 40]
+
+        self.projectile_alive_dimensions = [10, 10]
+        self.projectile_dead_dimensions = [10,10]
+
+        self.dimensions['CHARACTERALIVE'] = self.character_alive_dimensions
+        self.dimensions['CHARACTERDEAD'] = self.character_dead_dimensions
+        self.dimensions['PROJECTILEALIVE'] = self.projectile_alive_dimensions
+        self.dimensions['PROJECTILEDEAD'] = self.projectile_alive_dimensions
+
+    def test_for_collision(self,
+                           object1_name, object1_topleft_position, object1_state,
+                           object2_name, object2_topleft_position, object2_state):
+        # put into a string (key) such as: CHARACTERALIVE
+        object1_dimensions_key = object1_name + object1_state
+        object2_dimensions_key = object2_name + object2_state
+        # use the keys to get the dimensions
+        # raise error if there is no dimensions of that type
+
+        object1_dimensions = self.dimensions[object1_dimensions_key]
+        object2_dimensions = self.dimensions[object2_dimensions_key]
+
+        # setting up positions and values
+        object1_left = object1_topleft_position[0] # get the left position
+        object1_right = object1_left + object1_dimensions[0] # get the right
+        object1_top = object1_topleft_position[1] # get the top position
+        object1_bottom = object1_top + object1_dimensions[1] # get the bottom
+
+        object2_left = object2_topleft_position[0] # get the left position
+        object2_right = object2_left + object2_dimensions[0] # get the right
+        object2_top = object2_topleft_position[1] # get the top position
+        object2_bottom = object2_top + object2_dimensions[1] # get the bottom
+
+
+        # testing for the collision
+        if object1_bottom < object2_top:
+            return False # no collision
+        if object1_top > object2_bottom:
+            return False # no collision
+        if object1_right < object2_left:
+            return False
+        if object1_left > object2_right:
+            return False
+
+        return True # if it has not returned false already, its a collision
+    
 
 class Vector():
     '''
@@ -400,7 +488,7 @@ class GameStateObject():
         self.id = None
         self.eventManager = None
         
-    def update(self):
+    def update(self, delta_time):
         pass
 
 
@@ -412,11 +500,14 @@ class CharacterState(GameStateObject):
         GameStateObject.__init__(self)
 
         self.position_has_changed = False
-        
+
+        self.state = 'ALIVE'
         self.object_type = 'CHARACTER'
         self.id = None
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
+
+        self.life = 100
 
         self.movement_speed = 5
         self.positionX = 300
@@ -424,6 +515,7 @@ class CharacterState(GameStateObject):
         self.position = [self.positionX, self.positionY]
 
         self.position_has_changed = True
+        self.state_changed = True
         
     def set_id(self, new_id):
         self.id = new_id
@@ -433,17 +525,29 @@ class CharacterState(GameStateObject):
         if self.position_has_changed == True:
             self.position_has_changed = False
             return True
+        # check if the state has changed for package info
+        elif self.state_changed == True:
+            self.state_changed = False
+            return True
         else:
             return False
+
+    def get_hit(self, damage):
+        self.life -= damage
+        if self.life <= 0:
+            self.state = 'DEAD'
+            self.state_changed = True
 
     def package_info(self):
         # send info to the _send_complete_game_state function
         # to be sent to the clients as an update
         if self.id: # if we have an id already
-            return [self.object_type, self.id, self.position, None]
+            # example: [object type, id, [position], [velocity], state]
+            return [self.object_type, self.id, self.position, None, self.state]
         
     def move(self, direction):
         #print 'the character is moving in ' + str(direction)
+        #if self.state == 'ALIVE':
 
         # move in given direction
         if direction == 'UP':
@@ -475,27 +579,34 @@ class CharacterState(GameStateObject):
     def notify(self, event):
         pass
 
-    def update(self):
+    def update(self, delta_time):
         pass
 
 class ProjectileState(GameStateObject):
     '''
-    Game State object that holds project Logic
+    Game State object that holds projectile Logic
     (not visuals or user input)
     '''
-    def __init__(self, eventManager, starting_position, target_position):
+    def __init__(self, eventManager, starting_position, target_position, emitter_id):
         GameStateObject.__init__(self)
 
         self.velocity_has_changed = False
+        self.state = 'ALIVE'
         self.object_type = 'PROJECTILE'
         self.id = None
+        self.emitter_id = emitter_id
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
 
-        self.movement_speed = 5
+        self.movement_speed = 50
         self.positionX = starting_position[0]
+        print 'HERES THE X'
+        print self.positionX
         self.positionY = starting_position[1]
         self.position = [self.positionX, self.positionY]
+        print self.position
+
+        self.damage = 25
         
         self.target_positionX = target_position[0]
         self.target_positionY = target_position[1]
@@ -505,14 +616,21 @@ class ProjectileState(GameStateObject):
         self.direction = self.get_direction()
         
         self.velocity_has_changed = True
+        self.state_changed = True
 
     def set_id(self, new_id):
         self.id = new_id
 
     def state_has_changed(self):
-        #checks if the velocity has changed for package_info
+        # check if the velocity has changed for package_info
         if self.velocity_has_changed == True:
             self.velocity_has_changed = False
+            print 'velocity changed'
+            return True
+        # check if the state has changed for package info
+        elif self.state_changed == True:
+            self.state_changed = False
+            print 'state changed'
             return True
         else:
             return False
@@ -523,7 +641,8 @@ class ProjectileState(GameStateObject):
         if self.id: # if we have an id already
             return [self.object_type, self.id, self.position,
                     ((self.direction[0] * self.movement_speed),
-                    (self.direction[1] * self.movement_speed))] # send stuff
+                    (self.direction[1] * self.movement_speed)),
+                    self.state] # send stuff
 
     def get_direction(self):
         if self.target_position: # if the square has a target
@@ -534,12 +653,31 @@ class ProjectileState(GameStateObject):
             direction = self.distance.normalize() # normalize so its constant in all directions
             return direction
 
+    def _is_dead(self):
+        if self.state != 'DEAD':
+            self.state = 'DEAD'
+            self.state_changed = True
+
     def notify(self, event):
         pass
 
-    def update(self):
-        self.positionX += (self.direction[0] * self.movement_speed) # calculate speed from direction to move and speed constant
-        self.positionY += (self.direction[1] * self.movement_speed)
+    def update(self, delta_time):
+        # delta time is used to determine
+        # how far to advance the object state
+        #print self.positionX
+        print delta_time
+
+        if self.positionX < 0:
+            self._is_dead()
+        if self.positionX > 800:
+            self._is_dead()
+        if self.positionY < 0:
+            self._is_dead()
+        if self.positionY > 640:
+            self._is_dead()
+
+        self.positionX += ((self.direction[0] * self.movement_speed) * delta_time) # calculate speed from direction to move and speed constant
+        self.positionY += ((self.direction[1] * self.movement_speed) * delta_time)
         self.position = (round(self.positionX),round(self.positionY)) # apply values to object position
 
 class Game():
@@ -552,6 +690,8 @@ class Game():
         self.eventManager.register_pre_listener(self)
 
         self.state = 'PREPARING'
+
+        self.collision_tester = Collision_Tester()
 
         #self.players = [Player(eventManager)]
         self.object_ids = [] # holds the ids for all the objects
@@ -568,6 +708,29 @@ class Game():
         new_event = GameStartedEvent(self)
         self.eventManager.post(new_event)
 
+    def _update_game_state(self, delta_time):
+        ''' updates all the objects in self.all_objects
+        it uses delta time to determine how far ahead the objects
+        state should advance
+        '''
+        # update objects
+        for o in self.all_objects:
+            o.update(delta_time)
+                
+        # test for collisions
+        for c in self.characters:
+            for p in self.projectiles:
+                # cant hit the character with his own shots!
+                if p.emitter_id == c.id:
+                    break # move onto new projectile
+                else:
+                #print p.emitter_id, c.id
+                # if they are colliding
+                    if self.collision_tester.test_for_collision(c.object_type, c.position, c.state,
+                                                                p.object_type, p.position, p.state):
+                        c.get_hit(p.damage) # hit the character
+    
+
     def _create_new_character(self):
         #spawn a character
         character = CharacterState(self.eventManager) # create a character
@@ -580,8 +743,8 @@ class Game():
         self.characters.append(character)
         self.object_ids.append(character_id)
 
-    def _create_new_projectile(self, starting_position, target_position):
-        projectile = ProjectileState(self.eventManager, starting_position, target_position)
+    def _create_new_projectile(self, starting_position, target_position, emitter_id):
+        projectile = ProjectileState(self.eventManager, starting_position, target_position, emitter_id)
         projectile_id = id(projectile)
         projectile.set_id(projectile_id)
 
@@ -599,19 +762,16 @@ class Game():
             if current_object.state_has_changed():
                 game_objects_info.append(current_object_info)
 
-        if game_objects_info == None: # if its none
-            print 'its noneEEEEE'
+        if not game_objects_info: # if its none
             pass
         else:
-            print game_objects_info
             newEvent = CompleteGameStateEvent(game_objects_info)
             self.eventManager.post(newEvent)
     def notify(self, event):
 
         if event.name == 'Tick Event':
             #update all the objects
-            for o in self.all_objects:
-                o.update()
+            self._update_game_state(event.delta_time)
             self._send_complete_game_state()
         
         if isinstance(event, GameStartRequestEvent):
@@ -628,7 +788,7 @@ class Game():
             character_to_move.move(event.direction)
 
         elif event.name == 'Copyable Create Projectile Request Event':
-            self._create_new_projectile(event.starting_position, event.target_position)
+            self._create_new_projectile(event.starting_position, event.target_position, event.emitter_id)
             
 
 def main():
