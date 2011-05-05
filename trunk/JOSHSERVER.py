@@ -1,9 +1,13 @@
+import sys
 import math
 import time
 
+from twisted.internet import selectreactor
+selectreactor.install()
+from twisted.internet import reactor
+
 from twisted.spread import pb
 from twisted.internet import protocol
-from twisted.internet import reactor
 
 from weakref import WeakKeyDictionary
 
@@ -291,16 +295,18 @@ class FrameRateTicker():
         self.FPS = 40
         self.minimum_FPS = 4
         
-        
         self.running = True
         self.run()
 
     def run(self):
+
         self.last_time = self.current_time # set last time
         self.current_time = time.time() # get current time
         self.delta_time =  self.current_time - self.last_time # get delta time
         if self.delta_time > (1.0 / self.minimum_FPS):
-            delta_time = (1.0 / self.minimum_FPS)
+            self.delta_time = (1.0 / self.minimum_FPS)
+        sys.stdout.write('\rdelta time: ' + str(self.delta_time))
+        sys.stdout.flush()
             
         self.extra_time_accumulator += self.delta_time
         while self.extra_time_accumulator >= self.delta_time:
@@ -309,13 +315,12 @@ class FrameRateTicker():
             self.extra_time_accumulator -= self.delta_time
             newEvent = TickEvent(self.delta_time)
             self.eventManager.post(newEvent)
-        
+
         # call this function again
         if self.running == True:
             reactor.callLater((1.0 / self.FPS), self.run)
         else:
             pass
-
 
     def notify(self, event):
         if isinstance(event, ProgramQuitEvent): # if we got a quit program event
@@ -404,12 +409,14 @@ class Collision_Tester():
         self.character_dead_dimensions = [40, 40]
 
         self.projectile_alive_dimensions = [10, 10]
+        self.projectile_dying_dimensions = [10, 10]
         self.projectile_dead_dimensions = [10,10]
 
         self.dimensions['CHARACTERALIVE'] = self.character_alive_dimensions
         self.dimensions['CHARACTERDEAD'] = self.character_dead_dimensions
         self.dimensions['PROJECTILEALIVE'] = self.projectile_alive_dimensions
-        self.dimensions['PROJECTILEDEAD'] = self.projectile_alive_dimensions
+        self.dimensions['PROJECTILEDYING'] = self.projectile_dying_dimensions
+        self.dimensions['PROJECTILEDEAD'] = self.projectile_dead_dimensions
 
     def test_for_collision(self,
                            object1_name, object1_topleft_position, object1_state,
@@ -600,11 +607,8 @@ class ProjectileState(GameStateObject):
 
         self.movement_speed = 50
         self.positionX = starting_position[0]
-        print 'HERES THE X'
-        print self.positionX
         self.positionY = starting_position[1]
         self.position = [self.positionX, self.positionY]
-        print self.position
 
         self.damage = 25
         
@@ -612,11 +616,15 @@ class ProjectileState(GameStateObject):
         self.target_positionY = target_position[1]
         self.target_position = [self.target_positionX, self.target_positionY]
 
-        self.direction = None
-        self.direction = self.get_direction()
+        self.velocity = None # direction with magnitude
+        self.direction = None # just direction vector
+        self.velocity = self.get_velocity()
         
         self.velocity_has_changed = True
         self.state_changed = True
+
+        self.DURATION_OF_DYING_STATE = 60 # time between alive and dead states
+        self.duration_of_dying_state = self.DURATION_OF_DYING_STATE
 
     def set_id(self, new_id):
         self.id = new_id
@@ -625,12 +633,10 @@ class ProjectileState(GameStateObject):
         # check if the velocity has changed for package_info
         if self.velocity_has_changed == True:
             self.velocity_has_changed = False
-            print 'velocity changed'
             return True
         # check if the state has changed for package info
         elif self.state_changed == True:
             self.state_changed = False
-            print 'state changed'
             return True
         else:
             return False
@@ -639,24 +645,32 @@ class ProjectileState(GameStateObject):
         # send info to the _send_complete_game_state function
         # to be sent to the clients as an update
         if self.id: # if we have an id already
-            return [self.object_type, self.id, self.position,
-                    ((self.direction[0] * self.movement_speed),
-                    (self.direction[1] * self.movement_speed)),
-                    self.state] # send stuff
+            return [self.object_type, self.id, self.position, self.velocity, self.state] # send stuff
 
-    def get_direction(self):
+    def get_velocity(self):
         if self.target_position: # if the square has a target
             position = Vector(self.positionX, self.positionY) # create a vector from center x,y value
             target = Vector(self.target_positionX, self.target_positionY) # and one from the target x,y
             self.distance = target - position # get total distance between target and position
 
-            direction = self.distance.normalize() # normalize so its constant in all directions
-            return direction
+            self.direction = self.distance.normalize() # normalize so its constant in all directions
+            velocityX = self.direction[0] * self.movement_speed
+            velocityY = self.direction[1] * self.movement_speed
+            self.velocity = [velocityX, velocityY]
+            return self.velocity
 
     def _is_dead(self):
         if self.state != 'DEAD':
             self.state = 'DEAD'
+            self.velocity = [0,0]
+            self.velocity_has_changed = True
             self.state_changed = True
+
+    def _is_dying(self):
+        if self.state == 'ALIVE':
+            self.state = 'DYING'
+            self.state_changed = True
+            self.duration_of_dying_state = self.DURATION_OF_DYING_STATE
 
     def notify(self, event):
         pass
@@ -665,20 +679,27 @@ class ProjectileState(GameStateObject):
         # delta time is used to determine
         # how far to advance the object state
         #print self.positionX
-        print delta_time
+        #print delta_time
+        # if were dying
+        if self.state == 'DYING':
+            self.duration_of_dying_state -= 1
+            if self.duration_of_dying_state <= 0:
+                self._is_dead()
+        # if alive. we can check if we need to die
+        if self.state == 'ALIVE':
+            if self.positionX < 0:
+                self._is_dying()
+            if self.positionX > 400:
+                self._is_dying()
+            if self.positionY < 0:
+                self._is_dying()
+            if self.positionY > 640:
+                self._is_dying()
 
-        if self.positionX < 0:
-            self._is_dead()
-        if self.positionX > 800:
-            self._is_dead()
-        if self.positionY < 0:
-            self._is_dead()
-        if self.positionY > 640:
-            self._is_dead()
-
-        self.positionX += ((self.direction[0] * self.movement_speed) * delta_time) # calculate speed from direction to move and speed constant
-        self.positionY += ((self.direction[1] * self.movement_speed) * delta_time)
-        self.position = (round(self.positionX),round(self.positionY)) # apply values to object position
+        if self.state in ['ALIVE', 'DYING']:
+            self.positionX += (self.velocity[0] * delta_time) # calculate speed from direction to move and speed constant
+            self.positionY += (self.velocity[1] * delta_time)
+            self.position = (round(self.positionX),round(self.positionY)) # apply values to object position
 
 class Game():
     '''
@@ -813,6 +834,6 @@ def main():
 
 
 if __name__ == '__main__':
-    #import cProfile
-    #cProfile.run('main()')
-    main()
+    import cProfile
+    cProfile.run('main()')
+    #main()
