@@ -367,7 +367,7 @@ class CPUSpinnerController():
 
             newEvent = RenderEvent()
             self.eventManager.post(newEvent)
-
+            
     def notify(self, event):
         if isinstance(event, ProgramQuitEvent):
             self.running = False
@@ -379,6 +379,7 @@ class KeyboardController():
     def __init__(self, eventManager):
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
+        self.shooting = True
 
     def notify(self, event):
         if isinstance(event, TickEvent):
@@ -393,13 +394,18 @@ class KeyboardController():
 
                 elif event.type == pygame.MOUSEBUTTONDOWN: # all the mouse down events
                     if event.button == 3: # right mouse button
+                        self.shooting = False
                         mouse_button = 'RIGHT'
                         mouse_position = event.pos
                         pass
                     elif event.button == 1: # left mouse button
+                        self.shooting = True
                         mouse_button = 'LEFT'
                         mouse_position = event.pos
                         newEvent = UserMouseInputEvent(mouse_button, mouse_position)
+
+                if self.shooting == True:
+                    newEvent = UserMouseInputEvent('LEFT', pygame.mouse.get_pos())
 
 
                 if newEvent:
@@ -430,6 +436,7 @@ class KeyboardController():
                 newEvent = UserKeyboardInputEvent(text_direction)
                 self.eventManager.post(newEvent)
 
+
 class CharacterSprite(pygame.sprite.Sprite):
     def __init__(self, character_id, position, velocity, object_state, group=None):
         pygame.sprite.Sprite.__init__(self, group)
@@ -438,11 +445,12 @@ class CharacterSprite(pygame.sprite.Sprite):
         self.state = object_state
 
         self.images = {} # dict to hold images
+
         self.alive_image = pygame.image.load(os.path.join('resources','character.png'))
         self.alive_image.convert()
+
         self.dead_image = pygame.image.load(os.path.join('resources','character_dead.png'))
         self.dead_image.convert()
-        
         self.images['ALIVE'] = self.alive_image
         self.images['DEAD'] = self.dead_image
         
@@ -483,10 +491,14 @@ class ProjectileSprite(pygame.sprite.Sprite):
         self.image_alive = pygame.image.load(os.path.join('resources','bulletblue.png'))
         self.image_alive.convert()
 
-        self.image_dead = pygame.image.load(os.path.join('resources','bulletpurple.png'))
+        self.image_dying = pygame.image.load(os.path.join('resources','bulletpurple.png'))
+        self.image_dying.convert()
+
+        self.image_dead = pygame.image.load(os.path.join('resources','bulletblack.png'))
         self.image_dead.convert()
         
         self.images['ALIVE'] = self.image_alive
+        self.images['DYING'] = self.image_dying
         self.images['DEAD'] = self.image_dead
 
         self.image = self.images[self.object_state]
@@ -500,7 +512,8 @@ class ProjectileSprite(pygame.sprite.Sprite):
         self.set_velocity(velocity)
 
     def set_position(self, position):
-        self.rect.topleft = position
+        self.positionX = position[0]
+        self.positionY = position[1]
 
     def set_velocity(self, velocity):
         self.velocity = velocity
@@ -509,7 +522,7 @@ class ProjectileSprite(pygame.sprite.Sprite):
         self.object_state = state
         
     def update(self, delta_time):
-        print delta_time
+        #print delta_time
 
         if self.image != self.images[self.object_state]:
             self.image = self.images[self.object_state]
@@ -518,7 +531,7 @@ class ProjectileSprite(pygame.sprite.Sprite):
         #print self.positionX
         self.positionX += (self.velocity[0] * delta_time) # calculate speed from direction to move and speed constant
         self.positionY += (self.velocity[1] * delta_time)
-        self.set_position((round(self.positionX),round(self.positionY))) # apply values to object position
+        self.rect.topleft = ((round(self.positionX),round(self.positionY))) # apply values to object position
         
 class PygameView():
     def __init__(self, eventManager, object_registry):
@@ -675,7 +688,9 @@ def main():
     print '...running complete'
 
 if __name__ == '__main__':
-    #import cProfile
-    #cProfile.run('main()')
-    main()
+    import cProfile
+    cProfile.run('main()')
+    #main()
+    reactor.stop()
     pygame.quit() # closes the pygame window for us
+
