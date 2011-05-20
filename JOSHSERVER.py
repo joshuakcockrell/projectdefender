@@ -113,8 +113,7 @@ class ClientConnectEvent(Event):
     def __init__(self, client):
         self.name = 'Client Connect Event'
         self.client = client
-
-
+        
 copyable_events = {}
 
 server_to_client_events = []
@@ -301,20 +300,23 @@ class FrameRateTicker():
     def run(self):
 
         self.last_time = self.current_time # set last time
+        print 'last_time ' + str(self.last_time)
+        print 'last current time ' + str(self.current_time)
         self.current_time = time.time() # get current time
+        print 'new current time ' + str(self.current_time)
         self.delta_time =  self.current_time - self.last_time # get delta time
+        print 'delta time ' + str(self.delta_time)
         if self.delta_time > (1.0 / self.minimum_FPS):
             self.delta_time = (1.0 / self.minimum_FPS)
-        sys.stdout.write('\rdelta time: ' + str(self.delta_time))
-        sys.stdout.flush()
             
         self.extra_time_accumulator += self.delta_time
-        while self.extra_time_accumulator >= self.delta_time:
-            newEvent = TickEvent(self.delta_time)
-            self.program_time += self.delta_time
-            self.extra_time_accumulator -= self.delta_time
-            newEvent = TickEvent(self.delta_time)
-            self.eventManager.post(newEvent)
+        print 'extra time accumulator ' + str(self.extra_time_accumulator)
+        #while self.extra_time_accumulator >= self.delta_time:
+        newEvent = TickEvent(self.delta_time)
+        self.program_time += self.delta_time
+        self.extra_time_accumulator -= self.delta_time
+        newEvent = TickEvent(self.delta_time)
+        self.eventManager.post(newEvent)
 
         # call this function again
         if self.running == True:
@@ -368,7 +370,7 @@ class NetworkClientView(object):
         if isinstance(event, ClientConnectEvent):
             # if a client wants to connect
             self.clients.append(event.client)
-            print 'THE CLIENT'
+            print 'New Client:'
             print event.client
 
         testing_event = event
@@ -387,6 +389,7 @@ class NetworkClientView(object):
         # see if the event is in our list of things we can send          
         if testing_event.__class__ in server_to_client_events:
             for c in self.clients:
+                
                 remoteCall = c.callRemote('RecieveEvent', testing_event)
         else:
             pass
@@ -510,7 +513,7 @@ class CharacterState(GameStateObject):
 
         self.state = 'ALIVE'
         self.object_type = 'CHARACTER'
-        self.id = None
+        self.id = None 
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
 
@@ -697,8 +700,11 @@ class ProjectileState(GameStateObject):
                 self._is_dying()
 
         if self.state in ['ALIVE', 'DYING']:
-            self.positionX += (self.velocity[0] * delta_time) # calculate speed from direction to move and speed constant
-            self.positionY += (self.velocity[1] * delta_time)
+            #self.positionX += (self.velocity[0] * delta_time) # calculate speed from direction to move and speed constant
+            #self.positionY += (self.velocity[1] * delta_time)
+            
+            self.positionX += (self.velocity[0] * .025) # calculate speed from direction to move and speed constant
+            self.positionY += (self.velocity[1] * .025)
             self.position = (round(self.positionX),round(self.positionY)) # apply values to object position
 
 class Game():
@@ -835,5 +841,5 @@ def main():
 
 if __name__ == '__main__':
     import cProfile
-    cProfile.run('main()')
-    #main()
+    #cProfile.run('main()')
+    main()

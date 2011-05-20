@@ -102,6 +102,7 @@ class ClientConnectEvent(Event):
         self.name = 'Client Connect Event'
         self.client = client
 
+
 copyable_events = {}
 
 server_to_client_events = []
@@ -252,6 +253,7 @@ class NetworkServerView(pb.Root):
             return
         print 'stopping the client reactor...'
         self.reactor.stop()
+        self.server = None
         self.pump_reactor()
         self.state = 'DISCONNECTING'
 
@@ -277,8 +279,9 @@ class NetworkServerView(pb.Root):
             elif self.state in ['CONNECTED', 'DISCONNECTING', 'CONNECTING']:
                 self.pump_reactor()
             return
-                
-        if isinstance(event, ProgramQuitEvent):
+
+
+        if event.name == 'Program Quit Event':
             self.disconnect()
             return
 
@@ -318,6 +321,7 @@ class NetworkServerController(pb.Referenceable):
         return True
 
     def notify(self, event):
+        
         if isinstance(event, ServerConnectEvent):
             event.server.callRemote('ClientConnect', self)
 
@@ -369,10 +373,38 @@ class CPUSpinnerController():
             self.eventManager.post(newEvent)
             
     def notify(self, event):
-        if isinstance(event, ProgramQuitEvent):
+        if event.name == 'Program Quit Event':
+            print 'FALSE AFASFA'
             self.running = False
 
 ################################################################################
+
+class SpriteStatsDirectory():
+    def __init__(self):
+        self.projectile_stats = {}
+
+        projectile_images = {}
+        projectile_image_alive = pygame.image.load(os.path.join('resources','bulletblue.png'))
+        projectile_image_alive.convert()
+        projectile_images['ALIVE'] = projectile_image_alive
+
+        projectile_image_dying = pygame.image.load(os.path.join('resources','bulletpurple.png'))
+        projectile_image_dying.convert()
+        projectile_images['DYING'] = projectile_image_dying
+
+        projectile_image_dead = pygame.image.load(os.path.join('resources','bulletblack.png'))
+        projectile_image_dead.convert()
+        projectile_images['DEAD'] = projectile_image_dead
+
+        self.projectile_stats['images'] = projectile_images
+
+    def get_stats(self, object_type, desired_stats):
+        if desired_stats == 'all stats':
+            if object_type == 'PROJECTILE':
+                return self.projectile_stats
+        
+
+
 
 class KeyboardController():
     ''' gets user input from the mouse and keyboard'''
@@ -388,9 +420,12 @@ class KeyboardController():
                 newEvent = None
                 if event.type == QUIT:
                     newEvent = ProgramQuitEvent()
+                    self.eventManager.post(newEvent)
+                    
                 elif event.type == KEYDOWN:
                     if event.key in [pygame.K_ESCAPE]:
                         newEvent = ProgramQuitEvent()
+                        self.eventManager.post(newEvent)
 
                 elif event.type == pygame.MOUSEBUTTONDOWN: # all the mouse down events
                     if event.button == 3: # right mouse button
@@ -404,8 +439,9 @@ class KeyboardController():
                         mouse_position = event.pos
                         newEvent = UserMouseInputEvent(mouse_button, mouse_position)
 
-                if self.shooting == True:
-                    newEvent = UserMouseInputEvent('LEFT', pygame.mouse.get_pos())
+                # shoot a lot
+                #if self.shooting == True:
+                    #newEvent = UserMouseInputEvent('LEFT', pygame.mouse.get_pos())
 
 
                 if newEvent:
@@ -438,7 +474,7 @@ class KeyboardController():
 
 
 class CharacterSprite(pygame.sprite.Sprite):
-    def __init__(self, character_id, position, velocity, object_state, group=None):
+    def __init__(self, character_id, position, velocity, object_state, sprite_stats_directory, group=None):
         pygame.sprite.Sprite.__init__(self, group)
         self.id = character_id
 
@@ -481,25 +517,17 @@ class CharacterSprite(pygame.sprite.Sprite):
         self.rect.topleft = self.position
 
 class ProjectileSprite(pygame.sprite.Sprite):
-    def __init__(self, projectile_id, position, velocity, object_state, group=None):
+    def __init__(self, projectile_id, position, velocity, object_state, sprite_stats_directory, group=None):
         pygame.sprite.Sprite.__init__(self, group)
-        self.id = projectile_id
 
+        self.id = projectile_id
+        self.object_type = 'PROJECTILE'
         self.object_state = object_state
         
-        self.images = {}
-        self.image_alive = pygame.image.load(os.path.join('resources','bulletblue.png'))
-        self.image_alive.convert()
+        self.sprite_stats_directory = sprite_stats_directory
+        self.object_stats = self.sprite_stats_directory.get_stats(self.object_type,'all stats')
 
-        self.image_dying = pygame.image.load(os.path.join('resources','bulletpurple.png'))
-        self.image_dying.convert()
-
-        self.image_dead = pygame.image.load(os.path.join('resources','bulletblack.png'))
-        self.image_dead.convert()
-        
-        self.images['ALIVE'] = self.image_alive
-        self.images['DYING'] = self.image_dying
-        self.images['DEAD'] = self.image_dead
+        self.images = self.object_stats['images']
 
         self.image = self.images[self.object_state]
         self.rect = self.image.get_rect()
@@ -546,6 +574,8 @@ class PygameView():
         self.screen.blit(self.background, (0,0))
         pygame.display.flip()
         self.clock = pygame.time.Clock()
+
+        self.sprite_stats_directory = SpriteStatsDirectory() # requires pygame init before
         
         self.user_controlled_character = None
         # we need the game state before we can request stuff
@@ -621,7 +651,7 @@ class PygameView():
 
     def _create_new_character_sprite(self, character_id, position, projectile_velocity, object_state, object_is_user_controlled):
         #create the new sprite
-        newCharacterSprite = CharacterSprite(character_id, position, projectile_velocity, object_state, self.character_sprites)
+        newCharacterSprite = CharacterSprite(character_id, position, projectile_velocity, object_state, self.sprite_stats_directory, self.character_sprites)
         self.all_sprites.append(newCharacterSprite)
         #assign the registry slot to the character sprite
         self.object_registry[character_id] = newCharacterSprite
@@ -630,7 +660,7 @@ class PygameView():
                 self.user_controlled_character = newCharacterSprite # set the sprite
 
     def _create_new_projectile_sprite(self, projectile_id, projectile_position, projectile_velocity, object_state, object_is_user_controlled):
-        newProjectileSprite = ProjectileSprite(projectile_id, projectile_position, projectile_velocity, object_state, self.projectile_sprites)
+        newProjectileSprite = ProjectileSprite(projectile_id, projectile_position, projectile_velocity, object_state, self.sprite_stats_directory, self.projectile_sprites)
         self.all_sprites.append(newProjectileSprite)
         # assign the registry slot to the projectile sprite
         self.object_registry[projectile_id] = newProjectileSprite
@@ -686,11 +716,11 @@ def main():
     print 'Running Program...'
     spinnerController.run()
     print '...running complete'
+    pygame.quit() # closes the pygame window for us
+
 
 if __name__ == '__main__':
     import cProfile
-    cProfile.run('main()')
-    #main()
-    reactor.stop()
-    pygame.quit() # closes the pygame window for us
+    #cProfile.run('main()')
+    main()
 
