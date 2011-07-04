@@ -3,8 +3,10 @@ import time
 import pygame
 from pygame.locals import *
 from twisted.spread import pb
-from twisted.internet.selectreactor import SelectReactor
-from twisted.internet.main import installReactor
+
+from twisted.internet import selectreactor
+selectreactor.install()
+from twisted.internet import reactor
 
 from weakref import WeakKeyDictionary
 
@@ -235,24 +237,18 @@ class NetworkServerView(pb.Root):
     def attempt_connection(self):
         print 'Attempting connection...'
         self.state = 'CONNECTING'
-        if self.reactor:
-            self.reactor.stop()
-            self.pump_reactor()
-        else:
-            self.reactor = SelectReactor()
-            installReactor(self.reactor)
-            connection = self.reactor.connectTCP('localhost', 24100, self.pbClientFactory)
-            deferred = self.pbClientFactory.getRootObject()
-            deferred.addCallback(self.connected)
-            deferred.addErrback(self.connect_failed)
-            self.reactor.startRunning()
+        connection = reactor.connectTCP('localhost', 24100, self.pbClientFactory)
+        deferred = self.pbClientFactory.getRootObject()
+        deferred.addCallback(self.connected)
+        deferred.addErrback(self.connect_failed)
+        #reactor.startRunning()
 
     def disconnect(self):
         print 'disconnecting...'
-        if not self.reactor:
+        if not reactor:
             return
         print 'stopping the client reactor...'
-        self.reactor.stop()
+        reactor.stop()
         self.server = None
         self.pump_reactor()
         self.state = 'DISCONNECTING'
@@ -269,8 +265,8 @@ class NetworkServerView(pb.Root):
         self.state = 'DISCONNECTED'
 
     def pump_reactor(self):
-        self.reactor.runUntilCurrent()
-        self.reactor.doIteration(False)
+        reactor.runUntilCurrent()
+        reactor.doIteration(False)
         
     def notify(self, event):
         if isinstance(event, TickEvent):
@@ -339,38 +335,45 @@ class CPUSpinnerController():
         self.eventManager.register_listener(self)
         self.clock = pygame.time.Clock() # create a clock
         
-        self.program_time = 0.0
         self.initial_time = time.time()
         self.current_time = self.initial_time
         self.delta_time = 0.01 # not sure why .01
-        self.extra_time_accumulator = self.delta_time
         self.FPS = 40
         self.minimum_FPS = 4
 
         self.running = True
 
     def run(self):
-        while self.running:
-            pygame.display.set_caption(str(self.clock.get_fps()))
-            self.clock.tick(self.FPS)
-            
-            self.last_time = self.current_time # set last time
-            self.current_time = time.time() # get current time
-            self.delta_time =  self.current_time - self.last_time # get delta time
-            if self.delta_time > (1.0 / self.minimum_FPS):
-                delta_time = (1.0 / self.minimum_FPS)
-                
-            self.extra_time_accumulator += self.delta_time
+        #while self.running:
+        pygame.display.set_caption(str(self._get_frames_per_second(self.delta_time)))
+        #self.clock.tick(self.FPS)
 
-            while self.extra_time_accumulator >= self.delta_time:
-                newEvent = TickEvent(self.delta_time)
-                self.program_time += self.delta_time
-                self.extra_time_accumulator -= self.delta_time
-                newEvent = TickEvent(self.delta_time)
-                self.eventManager.post(newEvent)
+        if self.running == True:
+            reactor.callLater((1.0 / self.FPS), self.run)
+        else:
+            pass
 
-            newEvent = RenderEvent()
-            self.eventManager.post(newEvent)
+        time.sleep(1)
+        
+        self.last_time = self.current_time # set last time
+        self.current_time = time.time() # get current time
+        self.delta_time =  self.current_time - self.last_time # get delta time
+
+        newEvent = TickEvent(self.delta_time)
+        newEvent = TickEvent(self.delta_time)
+        self.eventManager.post(newEvent)
+
+        newEvent = RenderEvent()
+        self.eventManager.post(newEvent)
+        
+
+    def _get_frames_per_second(self, delta_time):
+        '''
+        calculates fps
+        '''
+        fps = 1.0 / delta_time
+        return fps
+        
             
     def notify(self, event):
         if event.name == 'Program Quit Event':
@@ -592,11 +595,16 @@ class PygameView():
         self.character_sprites = pygame.sprite.RenderUpdates()
         self.projectile_sprites = pygame.sprite.RenderUpdates()
 
+        self.timer = 0
+        self.times = 0
+
     def _update_game_state(self, game_state):
         # recieved a list of game objects (characters, projectiles, etc...)
         # example of game state list
         # 6
         # [['CHARACTER', 19376408, [300, 300]], ['CHARACTER', 19377248, [300, 300]]]
+
+        
         for game_object in game_state:
             object_name = game_object[0]
             object_id = game_object[1]
@@ -669,6 +677,11 @@ class PygameView():
         if isinstance(event, TickEvent):
             self.screen.blit(self.background, (0,0))
             delta_time = event.delta_time
+
+            self.timer += delta_time
+            self.times += 1
+            print self.timer
+            print self.times
             for s in self.all_sprites:
                 s.update(event.delta_time)
 
@@ -715,6 +728,7 @@ def main():
     print '...Loading Complete!'
     print 'Running Program...'
     spinnerController.run()
+    reactor.run()
     print '...running complete'
     pygame.quit() # closes the pygame window for us
 
