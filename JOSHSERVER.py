@@ -5,6 +5,7 @@ import time
 from twisted.internet import selectreactor
 selectreactor.install()
 from twisted.internet import reactor
+import pygame
 
 from twisted.spread import pb
 from twisted.internet import protocol
@@ -286,43 +287,33 @@ class FrameRateTicker():
     def __init__(self, eventManager):
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
-        self.program_time = 0.0
         self.initial_time = time.time()
         self.current_time = self.initial_time
         self.delta_time = 0.01 # not sure why .01
         self.extra_time_accumulator = self.delta_time
         self.FPS = 40
         self.minimum_FPS = 4
+        self.clock = pygame.time.Clock()
         
         self.running = True
-        self.run()
 
     def run(self):
-
-        self.last_time = self.current_time # set last time
-        print 'last_time ' + str(self.last_time)
-        print 'last current time ' + str(self.current_time)
-        self.current_time = time.time() # get current time
-        print 'new current time ' + str(self.current_time)
-        self.delta_time =  self.current_time - self.last_time # get delta time
-        print 'delta time ' + str(self.delta_time)
-        if self.delta_time > (1.0 / self.minimum_FPS):
-            self.delta_time = (1.0 / self.minimum_FPS)
-            
-        self.extra_time_accumulator += self.delta_time
-        print 'extra time accumulator ' + str(self.extra_time_accumulator)
-        #while self.extra_time_accumulator >= self.delta_time:
-        newEvent = TickEvent(self.delta_time)
-        self.program_time += self.delta_time
-        self.extra_time_accumulator -= self.delta_time
-        newEvent = TickEvent(self.delta_time)
-        self.eventManager.post(newEvent)
-
-        # call this function again
+        #while self.running:
+                # call this function again
         if self.running == True:
             reactor.callLater((1.0 / self.FPS), self.run)
         else:
             pass
+            #self.clock.tick(self.FPS)
+        time.sleep(1)
+        self.last_time = self.current_time # set last time
+        self.current_time = time.time() # get current time
+        self.delta_time =  self.current_time - self.last_time # get delta time
+        #print 'delta time ' + str(self.delta_time)
+            
+        newEvent = TickEvent(self.delta_time)
+        self.eventManager.post(newEvent)
+
 
     def notify(self, event):
         if isinstance(event, ProgramQuitEvent): # if we got a quit program event
@@ -726,6 +717,8 @@ class Game():
         self.characters = []
         self.projectiles = []
         self.all_objects = []
+        self.timer = 0
+        self.times = 0
                 
     def start(self):
         print 'Starting Game...'
@@ -740,6 +733,10 @@ class Game():
         it uses delta time to determine how far ahead the objects
         state should advance
         '''
+        self.timer += delta_time
+        self.times += 1
+        print self.timer
+        print self.times
         # update objects
         for o in self.all_objects:
             o.update(delta_time)
@@ -826,6 +823,7 @@ def main():
     
     eventManager = ServerEventManager()
     frameRateTicker = FrameRateTicker(eventManager)
+    frameRateTicker.run()
     object_registry = {}
     clientController = NetworkClientController(eventManager, object_registry)
     clientView = NetworkClientView(eventManager, object_registry)
