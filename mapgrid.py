@@ -90,8 +90,11 @@ class MapGrid():
         room variables:
         0 = empty
         1 = floor
-        2 = wall
-        3 = closed wall (unable to build off of)
+        2 = closed wall (unable to build off of)
+        3 = right wall
+        4 = up wall
+        5 = left wall
+        6 = down wall
         '''
 
         terrain_map_grid = empty_terrain_map_grid
@@ -106,12 +109,36 @@ class MapGrid():
         # loop through and fill the map with 1s where the room is
         for w in range(new_room_width):
             for h in range(new_room_height):
-                if w == 0 or h == 0 or (w == new_room_width - 1) or (h == new_room_height - 1):
-                    # set the walls
-                    terrain_map_grid[current_position_room_center_x - (new_room_width / 2) + w][current_position_room_center_y - (new_room_height / 2) + h]= 2
-                else:
+
+                ##### Check if the tile is on a wall #####
+                number_of_walls_on_tile = 0 # this tile is not a wall. if a tile is a wall, this will be 1. If its a corner, it will be 2.
+                if w == 0:
+                    # this is a left side wall
+                    terrain_map_grid[current_position_room_center_x - (new_room_width / 2) + w][current_position_room_center_y - (new_room_height / 2) + h] = 5
+                    number_of_walls_on_tile += 1 # this is a wall
+                    
+                if h == 0:
+                    # this is a up side wall
+                    terrain_map_grid[current_position_room_center_x - (new_room_width / 2) + w][current_position_room_center_y - (new_room_height / 2) + h] = 4
+                    number_of_walls_on_tile += 1 # this is a wall
+                    
+                if w == new_room_width - 1:
+                    # this is a right side wall
+                    terrain_map_grid[current_position_room_center_x - (new_room_width / 2) + w][current_position_room_center_y - (new_room_height / 2) + h] = 3
+                    number_of_walls_on_tile += 1 # this is a wall
+                    
+                if h == new_room_height - 1:  
+                    # this is a down wall
+                    terrain_map_grid[current_position_room_center_x - (new_room_width / 2) + w][current_position_room_center_y - (new_room_height / 2) + h] = 6
+                    number_of_walls_on_tile += 1 # this is a wall
+
+                if number_of_walls_on_tile < 1:
                     # set the floors
-                    terrain_map_grid[current_position_room_center_x - (new_room_width / 2) + w][current_position_room_center_y - (new_room_height / 2) + h]= 1
+                    terrain_map_grid[current_position_room_center_x - (new_room_width / 2) + w][current_position_room_center_y - (new_room_height / 2) + h] = 1
+
+                ##### Block off the corners #####
+                if  number_of_walls_on_tile >= 2:
+                    terrain_map_grid[current_position_room_center_x - (new_room_width / 2) + w][current_position_room_center_y - (new_room_height / 2) + h] = 2
                     
         '''
         while current_room_number < self.number_of_rooms:
