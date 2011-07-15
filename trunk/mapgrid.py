@@ -1,36 +1,77 @@
 ##### RANDOM MAP GENERATOR #####
 
 import random
+import math
+
+class Vector():
+    '''
+    Class:
+        creates operations to handle vectors such
+        as direction, position, and speed
+    '''
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __str__(self): # used for printing vectors
+        return "(%s, %s)"%(self.x, self.y)
+
+    def __getitem__(self, key):
+        if key == 0:
+            return self.x
+        elif key == 1:
+            return self.y
+        else:
+            raise IndexError("This "+str(key)+" key is not a vector key!")
+
+    def __sub__(self, o): # subtraction
+        return Vector(self.x - o.x, self.y - o.y)
+
+    def length(self): # get length (used for normalize)
+        return math.sqrt((self.x**2 + self.y**2)) 
+
+    def normalize(self): # divides a vector by its length
+        l = self.length()
+        if l != 0:
+            return (self.x / l, self.y / l)
+        return None
+    
 
 class MapGrid():
     def __init__(self, map_width, map_height, number_of_rooms,
+                 starting_room_direction,
                  max_room_width, max_room_height,
                  min_room_width, min_room_height,
-                 max_hall_length, min_hall_length):
+                 max_hall_length, min_hall_length,
+                 room_size_multiplier):
 
         self.number_of_rooms = number_of_rooms
         self.map_width = map_width
         self.map_height = map_width
 
         # create a grid which holds the terrain image information
-        self.empty_terrain_map_grid = self._generate_new_empty_map_grid(self.map_width, self.map_height)
+        self.empty_terrain_map_grid = self._generate_empty_map_grid(self.map_width, self.map_height)
         #self.terrain_map_grid = self._generate_terrain_map_random_walk(self.empty_terrain_map_grid)
 
         self.terrain_map_grid = self._generate_terrain_map_random_rooms(self.empty_terrain_map_grid,
-                                                                        number_of_rooms,
+                                                                        number_of_rooms, starting_room_direction,
                                                                         max_room_width, max_room_height,
                                                                         min_room_width, min_room_height,
-                                                                        max_hall_length, min_hall_length)
+                                                                        max_hall_length, min_hall_length,
+                                                                        room_size_multiplier)
         # create a grid which holds the collision tile information
-        self.empty_collision_map_grid = self._generate_new_empty_map_grid(self.map_width, self.map_height)
+        self.empty_collision_map_grid = self._generate_empty_map_grid(self.map_width, self.map_height)
 
         # create a grid which holds the gravitational tile information
-        self.empty_gravity_map_grid = self._generate_new_empty_map_grid(self.map_width, self.map_height)
+        self.gravity_map_grid = self._generate_empty_gravity_map_grid(self.map_width, self.map_height)
 
+        #gravity_map_grid, gravity_position, radius, force_denometer
+        self.gravity_map_grid = self._add_gravity_point(self.gravity_map_grid, [4,4], 5, 1)
+        print self.gravity_map_grid
         # create a grid which holds the flood fill AI influence map
-        self.empty_influence_map_grid = self._generate_new_empty_map_grid(self.map_width, self.map_height)
+        self.empty_influence_map_grid = self._generate_empty_map_grid(self.map_width, self.map_height)
 
-    def _generate_new_empty_map_grid(self, map_width, map_height):
+    def _generate_empty_map_grid(self, map_width, map_height):
         '''
         creates a new 2d array with the given specs
         '''
@@ -42,6 +83,42 @@ class MapGrid():
                 new_map_grid[x].append(0) # fill in our rows
 
         return new_map_grid
+
+    def _generate_empty_gravity_map_grid(self, map_width, map_height):
+        '''
+        creates a new 2d array with the given specs
+        '''
+
+        new_map_grid = [] # create our new list
+        for x in range(map_width):
+            new_map_grid.append([]) # add our columns to the array
+            for y in range(map_height):
+                # fill the grid with empty:
+                #[[velocity], force]
+                new_map_grid[x].append([[0.0,0.0], 0]) # fill in our rows
+                
+
+        return new_map_grid
+
+    def _set_terrain_grid_position_value(self, grid_map, position, value):
+        '''
+        sets a position on a grid to a given value,
+        used when closing off walls and manually setting values
+        '''
+
+        grid_map[position[0]][position[1]] = value
+
+        return grid_map
+
+    def _get_random_direction(self):
+        '''
+        generates a random direction,
+        used in the random walk algorithm
+        '''
+        random_direction = random.choice(['right', 'up', 'left', 'down'])
+
+        return random_direction
+        
 
     def _generate_terrain_map_random_walk(self, empty_terrain_map_grid):
         '''
@@ -77,11 +154,13 @@ class MapGrid():
         return terrain_map_grid
 
     def _generate_terrain_map_random_rooms(self, empty_terrain_map_grid, number_of_rooms,
+                                           starting_room_direction,
                                            max_room_width, max_room_height,
                                            min_room_width, min_room_height,
-                                           max_hall_length, min_hall_length):
+                                           max_hall_length, min_hall_length,
+                                           room_size_multiplier):
         '''
-        fills up or grid with more clearly defined rooms
+        fills up our grid with more clearly defined rooms
         room variables:
         0 = empty
         1 = floor
@@ -90,11 +169,12 @@ class MapGrid():
         4 = up wall
         5 = left wall
         6 = down wall
+        7 = testing if stuff works
         '''
 
         terrain_map_grid = empty_terrain_map_grid
         number_of_rooms = number_of_rooms
-        current_room_number = 0
+        self.current_room_number = 0
 
         # set our starting room center (middle of the map)
         current_tile_position_x = self.map_width / 2
@@ -104,38 +184,69 @@ class MapGrid():
         ##### Create our first room #####
         
         # get room stats
+        print 'creating first room'
         new_room_width = random.randrange(min_room_width, max_room_width)
         new_room_height = random.randrange(min_room_height, max_room_height)
 
         terrain_map_grid = self._append_room_to_terrain_map(terrain_map_grid, current_tile_position,
-                                                            new_room_width, new_room_height)
-        current_room_number += 1
+                                                            new_room_width, new_room_height,
+                                                            starting_room_direction)
+        self.current_room_number += 1
         
-        while current_room_number < number_of_rooms:
+        while self.current_room_number < number_of_rooms:
+            print 'making the rest of the rooms'
             ##### Make the rest of the rooms #####
 
-            # get next starting room position
+            # get random hall direction
             hall_direction = self._get_random_direction()
+            # get next hall starting position
             hall_start_position = self._get_hall_start_position(terrain_map_grid, hall_direction)
-
-            # create a hall
-            hall_distance = random.randrange(min_hall_length, max_hall_length)
-            hall_end_position = self._get_hall_end_position(hall_start_position, hall_direction, hall_distance)
-            
-            if self._hall_intersects_terrain(hall_start_position, hall_direction, hall_distance):
-                print 'crossing over an already'
-            # get room stats
-            new_room_width = random.randrange(min_room_width, max_room_width)
-            new_room_height = random.randrange(min_room_height, max_room_height)
-
-            # create and append a room
+            print 'hall start position'
             print hall_start_position
-            print hall_end_position
-            terrain_map_grid = self._append_room_to_terrain_map(terrain_map_grid, hall_end_position,
-                                                                new_room_width, new_room_height)
-            current_room_number += 1
+            if hall_start_position != False:
+
+                # get hall distance
+                hall_distance = random.randrange(min_hall_length, max_hall_length)
+                print 'hall distance'
+                print hall_distance
+                # get hall end position
+                hall_end_position = self._get_hall_end_position(hall_start_position, hall_direction, hall_distance)
+                print 'hall end position'
+                print hall_end_position
+
+                # get room stats
+                room_width = random.randrange(min_room_width, max_room_width)
+                room_height = random.randrange(min_room_height, max_room_height)
+
+                # check if area is clear
+                if self._area_is_empty_of_terrain(terrain_map_grid, hall_start_position, hall_direction, hall_distance, room_width, room_height, room_size_multiplier):
+
+                    print 'current room number'
+                    print self.current_room_number
+
+                    print 'hall end position to append room'
+                    print hall_end_position
+
+                    # create and append a room
+                    terrain_map_grid = self._append_room_to_terrain_map(terrain_map_grid, hall_end_position,
+                                                                        room_width, room_height, hall_direction)
+
+                    # create and append the hallway
+                    terrain_map_grid = self._append_hallway_to_terrain_map(terrain_map_grid, hall_start_position, hall_direction, hall_distance)
+                    print 'hall distance'
+                    print hall_distance
+
+                else:
+                    # close the wall
+                    print 'CLOSING TILE DUE TO BOUNDARIES'
+                    print hall_start_position
+                    terrain_grid_map = self._set_terrain_grid_position_value(terrain_map_grid, hall_start_position, 2)
+                    print 'hi'
+         
+                self.current_room_number += 1
         
         return terrain_map_grid
+
 
     def _get_hall_start_position(self, terrain_map_grid, direction):
         '''
@@ -148,18 +259,23 @@ class MapGrid():
             for tile_index, tile_value in enumerate(column):
                 # check if the current tile is correct for the direction we want to move
                 if tile_value == directions[direction]:
-                    start_position = [column_index, tile_index]
-                    print column
-                    print 'hi'
+                    print 'hall wants to start on direction:'
                     print direction
+                    start_position = [column_index, tile_index]
+                    print 'start position generated'
                     print start_position
                     return start_position
+
+        # we did not find any rooms with that direction available
+        return False
                 
     def _get_hall_end_position(self, hall_start_position, hall_direction, hall_distance):
         '''
         uses the hall start position and the hall end position
         to get the ending hall position
         '''
+        print 'hall starting position in hall end position function'
+        print hall_start_position
         if hall_direction == 'right':
             # get the end position to the right
             hall_end_position = [hall_start_position[0] + hall_distance, hall_start_position[1]]
@@ -175,101 +291,490 @@ class MapGrid():
             
         return hall_end_position
 
-    def _hall_intersects_terrain(self, hall_start_position, hall_direction, hall_distance):
+    def _area_is_empty_of_terrain(self, terrain_map_grid, hall_start_position, hall_direction,
+                                 hall_distance, room_width, room_height,
+                                 room_size_multiplier):
         '''
-        returns true if the hall is colliding with terrain
+        returns true if the area is empty of terrain (if the space is filled with 0s
+        room_size_multiplier: size of room * room_size_multiplier = size of area to check
         '''
         position_to_check = hall_start_position
-        hall_intersects_terrain = False
-        return False
-        '''
-        for x in range(hall_distance):
-            if hall_direction == 'right':
+        starting_grid_position = [0,0]
+        current_grid_position = [0,0]
 
+        # get size to check for right and left rooms
+        if hall_direction == 'right':
+            width_to_check = (room_width * room_size_multiplier) + hall_distance
+            height_to_check = room_height * room_size_multiplier
+
+
+            # set the top left corner of our area to check
+            starting_grid_position[0] = hall_start_position[0] + 1
+            starting_grid_position[1] = hall_start_position[1] - (height_to_check / 2)
+            
+            # round and turn positions into integers
+            starting_grid_position[0] = int(round(starting_grid_position[0]))
+            starting_grid_position[1] = int(round(starting_grid_position[1]))
+
+            print 'AREA INTERSECTS TERRAIN'
+            print 'hall direction'
+            print hall_direction
+            print 'hall distance'
+            print hall_distance
+            print 'room width'
+            print room_width
+            print 'room height'
+            print room_height
+            print 'width to check'
+            print width_to_check
+            print 'height to check'
+            print height_to_check
+            print 'hall starting position'
+            print hall_start_position
+            print 'starting grid position'
+            print starting_grid_position
+            
+            # go through all the tiles in the space to check and see if they are open
+            for x in range(width_to_check):
+                for y in range(height_to_check):
+
+                    current_grid_position[0] = starting_grid_position[0] + x
+                    current_grid_position[1] = starting_grid_position[1] + y
+
+                    # check if the spot is open
+                    print current_grid_position
+                    if current_grid_position[0] < 0 or current_grid_position[1] < 0:
+                        print 'WERE AT THE EDGE OF THE MAP HERE'
+                        print current_grid_position
+                        # we are at the edge of the map
+                        return False
+
+                    else:
+                        # we are not at the top or left of the map, yet..
+                        
+                        try:
+                            if terrain_map_grid[current_grid_position[1]][current_grid_position[0]] == 0:
+                                pass
+                            else:
+                                print 'WERE RUNNING INTO WALLS HERE'
+                                print current_grid_position
+                                # the spot is closed
+                                return False
+                        except IndexError:
+                            print 'WERE AT THE EDGE OF THE MAP HERE'
+                            print current_grid_position
+                            # the spot is at the edge of the map
+                            return False
+
+        if hall_direction == 'left':
+            width_to_check = (room_width * room_size_multiplier) + hall_distance
+            height_to_check = room_height * room_size_multiplier
+
+            # set the top left corner of our area to check
+            starting_grid_position[0] = (hall_start_position[0] - width_to_check) - 1
+            starting_grid_position[1] = hall_start_position[1] - (height_to_check / 2)
+
+            # round and turn positions into integers
+            starting_grid_position[0] = int(round(starting_grid_position[0]))
+            starting_grid_position[1] = int(round(starting_grid_position[1]))
+
+            print 'AREA INTERSECTS TERRAIN'
+            print 'hall direction'
+            print hall_direction
+            print 'hall distance'
+            print hall_distance
+            print 'room width'
+            print room_width
+            print 'room height'
+            print room_height
+            print 'width to check'
+            print width_to_check
+            print 'height to check'
+            print height_to_check
+            print 'hall starting position'
+            print hall_start_position
+            print 'starting grid position'
+            print starting_grid_position
+
+            # go through all the tiles in the space to check and see if they are open
+            for x in range(width_to_check):
+                for y in range(height_to_check):
+
+                    current_grid_position[0] = starting_grid_position[0] + x
+                    current_grid_position[1] = starting_grid_position[1] + y
+
+                    # check if the spot is open
+                    print current_grid_position
+                    if current_grid_position[0] < 0 or current_grid_position[1] < 0:
+                        print 'WERE AT THE EDGE OF THE MAP HERE'
+                        print current_grid_position
+                        # we are at the edge of the map
+                        return False
+
+                    else:
+                        # we are not at the top or left of the map, yet..
+                        
+                        try:
+                            if terrain_map_grid[current_grid_position[1]][current_grid_position[0]] == 0:
+                                pass
+                            else:
+                                print 'WERE RUNNING INTO WALLS HERE'
+                                print current_grid_position
+                                # the spot is closed
+                                return False
+                        except IndexError:
+                            print 'WERE AT THE EDGE OF THE MAP HERE'
+                            print current_grid_position
+                            # the spot is at the edge of the map
+                            return False
+
+        # get size to check for up and down rooms
         elif hall_direction == 'up':
+            width_to_check = room_width * room_size_multiplier
+            height_to_check = (room_height * room_size_multiplier) + hall_distance
 
-        elif hall_direction == 'left':
-            
+            # set the top left corner of our area to check
+            starting_grid_position[0] = hall_start_position[0] - (width_to_check / 2)
+            starting_grid_position[1] = (hall_start_position[1] - 1) - height_to_check
+
+            # round and turn positions into integers
+            starting_grid_position[0] = int(round(starting_grid_position[0]))
+            starting_grid_position[1] = int(round(starting_grid_position[1]))
+
+            print 'AREA INTERSECTS TERRAIN'
+            print 'hall direction'
+            print hall_direction
+            print 'hall distance'
+            print hall_distance
+            print 'room width'
+            print room_width
+            print 'room height'
+            print room_height
+            print 'width to check'
+            print width_to_check
+            print 'height to check'
+            print height_to_check
+            print 'hall starting position'
+            print hall_start_position
+            print 'starting grid position'
+            print starting_grid_position
+
+            # go through all the tiles in the space to check and see if they are open
+            for x in range(width_to_check):
+                for y in range(height_to_check):
+
+                    current_grid_position[0] = starting_grid_position[0] + x
+                    current_grid_position[1] = starting_grid_position[1] + y
+
+                    # check if the spot is open
+                    print current_grid_position
+                    if current_grid_position[0] < 0 or current_grid_position[1] < 0:
+                        print 'WERE AT THE EDGE OF THE MAP HERE'
+                        print current_grid_position
+                        # we are at the edge of the map
+                        return False
+
+                    else:
+                        # we are not at the top or left of the map, yet..
+                        
+                        try:
+                            if terrain_map_grid[current_grid_position[1]][current_grid_position[0]] == 0:
+                                pass
+                            else:
+                                print 'WERE RUNNING INTO WALLS HERE'
+                                print current_grid_position
+                                # the spot is closed
+                                return False
+                        except IndexError:
+                            print 'WERE AT THE EDGE OF THE MAP HERE'
+                            print current_grid_position
+                            # the spot is at the edge of the map
+                            return False
+
         elif hall_direction == 'down':
-            
-            position_to_check = hall_end_position
-        '''
+            width_to_check = room_width * room_size_multiplier
+            height_to_check = (room_height * room_size_multiplier) + hall_distance
 
-    def _get_random_direction(self):
-        '''
-        generates a random direction,
-        used in the random walk algorithm
-        '''
-        random_direction = random.choice(['right', 'up', 'left', 'down'])
+            # set the top left corner of our area to check
+            starting_grid_position[0] = hall_start_position[0] - (width_to_check / 2)
+            starting_grid_position[1] = hall_start_position[1] + 1
 
-        return random_direction
+            # round and turn positions into integers
+            starting_grid_position[0] = int(round(starting_grid_position[0]))
+            starting_grid_position[1] = int(round(starting_grid_position[1]))
+
+            print 'AREA INTERSECTS TERRAIN'
+            print 'hall direction'
+            print hall_direction
+            print 'hall distance'
+            print hall_distance
+            print 'room width'
+            print room_width
+            print 'room height'
+            print room_height
+            print 'width to check'
+            print width_to_check
+            print 'height to check'
+            print height_to_check
+            print 'hall starting position'
+            print hall_start_position
+            print 'starting grid position'
+            print starting_grid_position
+
+            # go through all the tiles in the space to check and see if they are open
+            for x in range(width_to_check):
+                for y in range(height_to_check):
+
+                    current_grid_position[0] = starting_grid_position[0] + x
+                    current_grid_position[1] = starting_grid_position[1] + y
+
+                    # check if the spot is open
+                    print current_grid_position
+                    if current_grid_position[0] < 0 or current_grid_position[1] < 0:
+                        print 'WERE AT THE EDGE OF THE MAP HERE'
+                        print current_grid_position
+                        # we are at the edge of the map
+                        return False
+
+                    else:
+                        # we are not at the top or left of the map, yet..
+                        
+                        try:
+                            if terrain_map_grid[current_grid_position[1]][current_grid_position[0]] == 0:
+                                pass
+                            else:
+                                print 'WERE RUNNING INTO WALLS HERE'
+                                print current_grid_position
+                                # the spot is closed
+                                return False
+                        except IndexError:
+                            print 'WERE AT THE EDGE OF THE MAP HERE'
+                            print current_grid_position
+                            # the spot is at the edge of the map
+                            return False
+                    
+        # if it has not returned False, then...
+        print 'THERE ARE NO WALLS WERE RUNNING INTO'
+        return True
         
 
-    def _append_room_to_terrain_map(self, terrain_map_grid, current_room_position,
-                                    new_room_width, new_room_height):
+
+    def _append_room_to_terrain_map(self, terrain_map_grid, hall_end_position, 
+                                    room_width, room_height, direction):
         '''
         Adds the room specs to the terrain map grid.
+        direction = which side the room is on in relation to the current_room_position
         '''
-        # loop through and fill the map with tiles where the room is
-        for x in range(new_room_width):
-            for y in range(new_room_height):
+        
+        room_starting_position = [0,0]
+        current_grid_position = [0,0]
 
-                ##### Decide what kind of tile we will make it #####
-                # make an empty position list
-                current_tile_position = [0,0]
-                number_of_walls_on_tile = 0 # this tile is not a wall. if a tile is a wall, this will be 1. If its a corner, it will be 2.
-                current_tile_position[0] = current_room_position[0] - (new_room_width / 2) + x
-                current_tile_position[1] = current_room_position[1] - (new_room_height / 2) + y
+        print 'in append room to terrain map'
+        print hall_end_position
+        print room_width
+        print room_height
+        print direction
+
+        # set the top left starting positions
+        if direction == 'center':
+            room_starting_position[0] = hall_end_position[0] - (room_width / 2)
+            room_starting_position[1] = hall_end_position[1] - (room_height / 2)
+
+        elif direction == 'right':
+            room_starting_position[0] = hall_end_position[0]
+            room_starting_position[1] = hall_end_position[1] - (room_height / 2)
+
+        elif direction == 'up':
+            room_starting_position[0] = hall_end_position[0] - (room_width / 2)
+            room_starting_position[1] = (hall_end_position[1] - room_height) + 1
+
+        elif direction == 'left':
+            room_starting_position[0] = (hall_end_position[0] - room_width) + 1
+            room_starting_position[1] = hall_end_position[1] - (room_height / 2)
+
+        elif direction == 'down':
+            room_starting_position[0] = hall_end_position[0] - (room_width / 2)
+            room_starting_position[1] = hall_end_position[1]
+        print 'room top left position'
+        print room_starting_position
+
+        for x in range(room_width):
+            for y in range(room_height):
+                
+                current_grid_position[0] = room_starting_position[0] + x
+                current_grid_position[1] = room_starting_position[1] + y
+                
+                # this tile is not a wall. if a tile is a wall, this will be 1. If its a corner, it will be 2.
+                number_of_walls_on_tile = 0
+
+                # this is a left side wall
                 if x == 0:
-                    # this is a left side wall
-                    terrain_map_grid[current_tile_position[0]][current_tile_position[1]] = 5
+                    terrain_map_grid[current_grid_position[0]][current_grid_position[1]] = 5
                     number_of_walls_on_tile += 1 # this is a wall
-                    
+
+                # this is a up side wall
                 if y == 0:
-                    # this is a up side wall
-                    terrain_map_grid[current_tile_position[0]][current_tile_position[1]] = 4
-                    number_of_walls_on_tile += 1 # this is a wall
-                    
-                if x == new_room_width - 1:
-                    # this is a right side wall
-                    terrain_map_grid[current_tile_position[0]][current_tile_position[1]] = 3
-                    number_of_walls_on_tile += 1 # this is a wall
-                    
-                if y == new_room_height - 1:  
-                    # this is a down wall
-                    terrain_map_grid[current_tile_position[0]][current_tile_position[1]] = 6
+                    print 'ISSUES HERE'
+                    print current_grid_position
+                    terrain_map_grid[current_grid_position[0]][current_grid_position[1]] = 4
                     number_of_walls_on_tile += 1 # this is a wall
 
+                # this is a right side wall
+                if x == room_width - 1:
+                    terrain_map_grid[current_grid_position[0]][current_grid_position[1]] = 3
+                    number_of_walls_on_tile += 1 # this is a wall
+
+                # this is a down wall
+                if y == room_height - 1:  
+                    terrain_map_grid[current_grid_position[0]][current_grid_position[1]] = 6
+                    number_of_walls_on_tile += 1 # this is a wall
+
+                # set the floors
                 if number_of_walls_on_tile < 1:
-                    # set the floors
-                    terrain_map_grid[current_tile_position[0]][current_tile_position[1]] = 1
+                    terrain_map_grid[current_grid_position[0]][current_grid_position[1]] = 1
 
-                ##### Block off the corners #####
+                # block off the corners so we cannot build halls there
                 if  number_of_walls_on_tile >= 2:
-                    terrain_map_grid[current_tile_position[0]][current_tile_position[1]] = 2
+                    terrain_map_grid[current_grid_position[0]][current_grid_position[1]] = 2
 
         return terrain_map_grid
+    
 
+    def _append_hallway_to_terrain_map(self, terrain_map_grid, hall_start_position,
+                                       hall_direction, hall_distance):
+        '''
+        Adds the room specs to the terrain map grid.
+        direction = which side the hallway is on in relation to the hall_start_position
+        '''
+        
+        starting_grid_position = [0,0]
+        current_grid_position = [0,0]
+        starting_grid_position[0] = hall_start_position[0]
+        starting_grid_position[1] = hall_start_position[1]
+        hall_width = 1
+        print 'hall start position'
+        print starting_grid_position
+        print 'hall direction'
+        print hall_direction
+
+        # add one to compensate for lists starting at 0
+        hall_distance += 1
+
+        # right hallways
+        if hall_direction == 'right':
+            width_to_fill = hall_distance
+            height_to_fill = hall_width
+
+            for x in range(hall_distance):
+                for y in range(hall_width):
+
+                    current_grid_position[0] = starting_grid_position[0] + x
+                    current_grid_position[1] = starting_grid_position[1] + y
+
+                    terrain_map_grid[current_grid_position[0]][current_grid_position[1]] = 7
+
+        # up hallways
+        elif hall_direction == 'up':
+            width_to_fill = 1
+            height_to_fill = hall_distance
+
+            for x in range(hall_width):
+                for y in range(hall_distance):
+
+                    current_grid_position[0] = starting_grid_position[0] - x
+                    current_grid_position[1] = starting_grid_position[1] - y
+
+                    terrain_map_grid[current_grid_position[0]][current_grid_position[1]] = 7
+
+        # left hallways
+        elif hall_direction == 'left':
+            width_to_fill = hall_distance
+            height_to_fill = 1
+
+            for x in range(hall_distance):
+                for y in range(hall_width):
+
+                    current_grid_position[0] = starting_grid_position[0] - x
+                    current_grid_position[1] = starting_grid_position[1] - y
+
+                    terrain_map_grid[current_grid_position[0]][current_grid_position[1]] = 7
+
+        # down hallways
+        elif hall_direction == 'down':
+            width_to_fill = 1
+            height_to_fill = hall_distance
+
+            for x in range(hall_width):
+                for y in range(hall_distance):
+
+                    current_grid_position[0] = starting_grid_position[0] + x
+                    current_grid_position[1] = starting_grid_position[1] + y
+
+                    terrain_map_grid[current_grid_position[0]][current_grid_position[1]] = 7
+
+        else:
+            print 'Invalid hallway direction in _append_hallway_to_terrain_map...'
+            
+        return terrain_map_grid
+
+
+    def _add_gravity_point(self, gravity_map_grid, gravity_position, radius, force_denometer):
+        gravity_position_vector = Vector(gravity_position[0], gravity_position[1])
+        diameter_to_check = radius * 2
+        # set the top left position to check
+        starting_position = [gravity_position[0] - radius, gravity_position[1] - radius]
+        current_position = [0,0]
+        for current_column in range(diameter_to_check):
+            for current_tile in range(diameter_to_check):
+                current_position = [starting_position[0] + current_tile,
+                                    starting_position[1] + current_column]
+                current_position_vector = Vector(current_position[0], current_position[1])
+                # get the distance to the gravity position
+                distance_to_gravity_position= gravity_position_vector - current_position_vector
+                # normalize the vector
+                normalized_distance = distance_to_gravity_position.normalize()
+                if normalized_distance == None:
+                    normalized_distance = [0.0,0.0]
+
+                length_to_gravity_position = distance_to_gravity_position.length()
+                force_of_gravity = length_to_gravity_position / force_denometer
+
+                # for testing purposes when using a text output
+
+                rounded_x_distance = int(round(normalized_distance[0] * 10)) / 10
+                rounded_y_distance = int(round(normalized_distance[1] * 10)) / 10
+                normalized_distance = [rounded_x_distance, rounded_y_distance]
+
+                force_of_gravity = int(round(force_of_gravity * 10)) / 10
+
+                gravity_map_grid[current_position[0]][current_position[1]] = [normalized_distance, force_of_gravity]
+
+        return gravity_map_grid
+    
 
 
 
                     
 if __name__ == '__main__':
     # general map stats
-    map_width = 20
-    map_height = 20
-    number_of_rooms = 3
+    map_width = 10
+    map_height = 10
+    number_of_rooms = 1
+    starting_room_direction = 'center'
 
     # random rooms stats
-    max_room_width = 4
-    max_room_height = 4
+    max_room_width = 5
+    max_room_height = 5
     min_room_width = 3
     min_room_height = 3
-    max_hall_length = 4
+    max_hall_length = 5
     min_hall_length = 3
+    room_size_multiplier = 1.2
     
     map_grid = MapGrid(map_width, map_height, number_of_rooms,
+                       starting_room_direction,
                        max_room_width, max_room_height,
                        min_room_width, min_room_height,
-                       max_hall_length, min_hall_length)
+                       max_hall_length, min_hall_length,
+                       room_size_multiplier)
     print map_grid.terrain_map_grid
