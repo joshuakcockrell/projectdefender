@@ -1,5 +1,6 @@
 import os
 import time
+import datetime
 import pygame
 from pygame.locals import *
 from twisted.spread import pb
@@ -7,6 +8,7 @@ from twisted.spread import pb
 from twisted.internet import selectreactor
 selectreactor.install()
 from twisted.internet import reactor
+from twisted.internet import task
 
 from weakref import WeakKeyDictionary
 
@@ -336,30 +338,40 @@ class CPUSpinnerController():
         self.clock = pygame.time.Clock() # create a clock
         
         self.initial_time = time.time()
+
+        #self.initial_time = datetime.datetime.now()
+
+
         self.current_time = self.initial_time
-        self.delta_time = 0.01 # not sure why .01
-        self.FPS = 40
-        self.minimum_FPS = 4
+        #self.delta_time = 0.01 # not sure why .01
+        self.FPS = 60.0
 
         self.running = True
 
+        #task.LoopingCall(self.run).start((1.0 / self.FPS))
+
     def run(self):
         #while self.running:
-        pygame.display.set_caption(str(self._get_frames_per_second(self.delta_time)))
+        #pygame.display.set_caption(str(self._get_frames_per_second(self.delta_time)))
         #self.clock.tick(self.FPS)
-
+        
         if self.running == True:
             reactor.callLater((1.0 / self.FPS), self.run)
         else:
             pass
+        
 
-        time.sleep(1)
+        #time.sleep(1)
         
         self.last_time = self.current_time # set last time
         self.current_time = time.time() # get current time
         self.delta_time =  self.current_time - self.last_time # get delta time
 
-        newEvent = TickEvent(self.delta_time)
+        #self.last_time = self.current_time
+        #self.current_time = datetime.datetime.now()
+        #self.delta_time = (self.current_time - self.last_time).seconds + (self.current_time - self.last_time).microseconds/1000000.0
+
+
         newEvent = TickEvent(self.delta_time)
         self.eventManager.post(newEvent)
 
@@ -378,6 +390,7 @@ class CPUSpinnerController():
     def notify(self, event):
         if event.name == 'Program Quit Event':
             print 'FALSE AFASFA'
+            #task.LoopingCall(self.run).stop()
             self.running = False
 
 ################################################################################
@@ -387,15 +400,15 @@ class SpriteStatsDirectory():
         self.projectile_stats = {}
 
         projectile_images = {}
-        projectile_image_alive = pygame.image.load(os.path.join('resources','bulletblue.png'))
+        projectile_image_alive = pygame.image.load(os.path.join('resources','bluebullet.png'))
         projectile_image_alive.convert()
         projectile_images['ALIVE'] = projectile_image_alive
 
-        projectile_image_dying = pygame.image.load(os.path.join('resources','bulletpurple.png'))
+        projectile_image_dying = pygame.image.load(os.path.join('resources','darkbluebullet.png'))
         projectile_image_dying.convert()
         projectile_images['DYING'] = projectile_image_dying
 
-        projectile_image_dead = pygame.image.load(os.path.join('resources','bulletblack.png'))
+        projectile_image_dead = pygame.image.load(os.path.join('resources','blackbullet.png'))
         projectile_image_dead.convert()
         projectile_images['DEAD'] = projectile_image_dead
 
@@ -485,10 +498,10 @@ class CharacterSprite(pygame.sprite.Sprite):
 
         self.images = {} # dict to hold images
 
-        self.alive_image = pygame.image.load(os.path.join('resources','character.png'))
+        self.alive_image = pygame.image.load(os.path.join('resources','player.png'))
         self.alive_image.convert()
 
-        self.dead_image = pygame.image.load(os.path.join('resources','character_dead.png'))
+        self.dead_image = pygame.image.load(os.path.join('resources','walltile.png'))
         self.dead_image.convert()
         self.images['ALIVE'] = self.alive_image
         self.images['DEAD'] = self.dead_image
