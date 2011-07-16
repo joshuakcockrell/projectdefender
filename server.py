@@ -1,8 +1,11 @@
 import sys
 import math
 import time
+import datetime
+
 
 from twisted.internet import selectreactor
+from twisted.internet import task
 selectreactor.install()
 from twisted.internet import reactor
 import pygame
@@ -288,14 +291,17 @@ class FrameRateTicker():
         self.eventManager = eventManager
         self.eventManager.register_listener(self)
         self.initial_time = time.time()
+
+        #self.initial_time = datetime.datetime.now()
+
+        
         self.current_time = self.initial_time
-        self.delta_time = 0.01 # not sure why .01
-        self.extra_time_accumulator = self.delta_time
-        self.FPS = 40
-        self.minimum_FPS = 4
+        self.FPS = 60.0
         self.clock = pygame.time.Clock()
         
         self.running = True
+
+        task.LoopingCall(self.run).start((1.0 / self.FPS))
 
     def run(self):
         #while self.running:
@@ -305,11 +311,17 @@ class FrameRateTicker():
         else:
             pass
             #self.clock.tick(self.FPS)
-        time.sleep(1)
+        #time.sleep(1)
         self.last_time = self.current_time # set last time
         self.current_time = time.time() # get current time
         self.delta_time =  self.current_time - self.last_time # get delta time
         #print 'delta time ' + str(self.delta_time)
+
+
+        #self.last_time = self.current_time
+        #self.current_time = datetime.datetime.now()
+        #self.delta_time = (self.current_time - self.last_time).seconds + (self.current_time - self.last_time).microseconds/1000000.0
+
             
         newEvent = TickEvent(self.delta_time)
         self.eventManager.post(newEvent)
@@ -318,6 +330,7 @@ class FrameRateTicker():
     def notify(self, event):
         if isinstance(event, ProgramQuitEvent): # if we got a quit program event
             self.running = False
+            task.LoopingCall(self.run).stop()
             
 
 class NetworkClientController(pb.Root):
@@ -691,11 +704,9 @@ class ProjectileState(GameStateObject):
                 self._is_dying()
 
         if self.state in ['ALIVE', 'DYING']:
-            #self.positionX += (self.velocity[0] * delta_time) # calculate speed from direction to move and speed constant
-            #self.positionY += (self.velocity[1] * delta_time)
             
-            self.positionX += (self.velocity[0] * .025) # calculate speed from direction to move and speed constant
-            self.positionY += (self.velocity[1] * .025)
+            self.positionX += (self.velocity[0] * delta_time) # calculate speed from direction to move and speed constant
+            self.positionY += (self.velocity[1] * delta_time)
             self.position = (round(self.positionX),round(self.positionY)) # apply values to object position
 
 class Game():
