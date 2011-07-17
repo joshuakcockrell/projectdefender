@@ -389,7 +389,6 @@ class CPUSpinnerController():
             
     def notify(self, event):
         if event.name == 'Program Quit Event':
-            print 'FALSE AFASFA'
             #task.LoopingCall(self.run).stop()
             self.running = False
 
@@ -512,6 +511,8 @@ class CharacterSprite(pygame.sprite.Sprite):
         self.position = None # position to move to during update
         self.set_position(position)
 
+        self.object_state = 'ALIVE'
+
     def set_position(self, position):
         self.position = position
 
@@ -566,13 +567,11 @@ class ProjectileSprite(pygame.sprite.Sprite):
         self.object_state = state
         
     def update(self, delta_time):
-        #print delta_time
 
         if self.image != self.images[self.object_state]:
             self.image = self.images[self.object_state]
             self.rect = self.image.get_rect()
 
-        #print self.positionX
         self.positionX += (self.velocity[0] * delta_time) # calculate speed from direction to move and speed constant
         self.positionY += (self.velocity[1] * delta_time)
         self.rect.topleft = ((round(self.positionX),round(self.positionY))) # apply values to object position
@@ -608,16 +607,14 @@ class PygameView():
         self.character_sprites = pygame.sprite.RenderUpdates()
         self.projectile_sprites = pygame.sprite.RenderUpdates()
 
-        self.timer = 0
-        self.times = 0
-
     def _update_game_state(self, game_state):
         # recieved a list of game objects (characters, projectiles, etc...)
         # example of game state list
         # 6
         # [['CHARACTER', 19376408, [300, 300]], ['CHARACTER', 19377248, [300, 300]]]
 
-        
+        print self.object_registry
+        print len(self.projectile_sprites)
         for game_object in game_state:
             object_name = game_object[0]
             object_id = game_object[1]
@@ -631,6 +628,12 @@ class PygameView():
                 current_object.set_position(object_position) # set position
                 current_object.set_velocity(object_velocity)
                 current_object.set_state(object_state)
+                
+
+                # remove the object if its dead
+                if current_object.object_state == 'DEAD':
+                    current_object.kill()
+                    self.object_registry.pop(object_id)
 
             # if it doesnt exist
             else:
@@ -641,7 +644,7 @@ class PygameView():
                 else:
                     object_is_user_controlled = False # not user controlled
                 object_class(object_id, object_position, object_velocity, object_state, object_is_user_controlled) # run the create sprite function
-                           
+
     def _user_wants_to_move_character(self, keyboard_input):
         ''' When the user presses w,a,s, or d:
         aka: when a User Keyboard Input Event is generated
@@ -691,10 +694,6 @@ class PygameView():
             self.screen.blit(self.background, (0,0))
             delta_time = event.delta_time
 
-            self.timer += delta_time
-            self.times += 1
-            print self.timer
-            print self.times
             for s in self.all_sprites:
                 s.update(event.delta_time)
 
@@ -748,6 +747,6 @@ def main():
 
 if __name__ == '__main__':
     import cProfile
-    #cProfile.run('main()')
-    main()
+    cProfile.run('main()')
+    #main()
 

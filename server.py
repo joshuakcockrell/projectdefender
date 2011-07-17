@@ -315,7 +315,6 @@ class FrameRateTicker():
         self.last_time = self.current_time # set last time
         self.current_time = time.time() # get current time
         self.delta_time =  self.current_time - self.last_time # get delta time
-        #print 'delta time ' + str(self.delta_time)
 
 
         #self.last_time = self.current_time
@@ -393,7 +392,6 @@ class NetworkClientView(object):
         # see if the event is in our list of things we can send          
         if testing_event.__class__ in server_to_client_events:
             for c in self.clients:
-                
                 remoteCall = c.callRemote('RecieveEvent', testing_event)
         else:
             pass
@@ -530,6 +528,7 @@ class CharacterState(GameStateObject):
 
         self.position_has_changed = True
         self.state_changed = True
+        # used to remove objects from references.
         
     def set_id(self, new_id):
         self.id = new_id
@@ -629,6 +628,7 @@ class ProjectileState(GameStateObject):
         
         self.velocity_has_changed = True
         self.state_changed = True
+        # used to remove objects from references.
 
         self.DURATION_OF_DYING_STATE = 60 # time between alive and dead states
         self.duration_of_dying_state = self.DURATION_OF_DYING_STATE
@@ -685,8 +685,6 @@ class ProjectileState(GameStateObject):
     def update(self, delta_time):
         # delta time is used to determine
         # how far to advance the object state
-        #print self.positionX
-        #print delta_time
         # if were dying
         if self.state == 'DYING':
             self.duration_of_dying_state -= 1
@@ -728,8 +726,6 @@ class Game():
         self.characters = []
         self.projectiles = []
         self.all_objects = []
-        self.timer = 0
-        self.times = 0
                 
     def start(self):
         print 'Starting Game...'
@@ -744,10 +740,7 @@ class Game():
         it uses delta time to determine how far ahead the objects
         state should advance
         '''
-        self.timer += delta_time
-        self.times += 1
-        print self.timer
-        print self.times
+
         # update objects
         for o in self.all_objects:
             o.update(delta_time)
@@ -796,6 +789,10 @@ class Game():
             current_object_info = current_object.package_info()
             if current_object.state_has_changed():
                 game_objects_info.append(current_object_info)
+            # if the object no longer needs to be kept alive.
+            if current_object.state == 'DEAD':
+                self.object_ids.remove(object_id)
+                self.object_registry.pop(object_id)
 
         if not game_objects_info: # if its none
             pass
