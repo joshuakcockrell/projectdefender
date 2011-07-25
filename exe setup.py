@@ -45,7 +45,7 @@ class pygame2exe(py2exe.build_exe.py2exe): #This hack make sure that pygame defa
 class BuildExe:
     def __init__(self):
         #Name of starting .py
-        self.script = os.path.join('cells.py')
+        self.script = os.path.join('2D Cellular Automaton Simulation.py')
         #self.script = 'C:\Documents and Settings\HP_Administrator\Desktop\Color Tower Defense\Scripts\Color Tower Defense.py'
  
         #Name of program
