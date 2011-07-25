@@ -28,13 +28,6 @@ class TickEvent(Event):
         self.name = 'Tick Event'
         self.delta_time = delta_time
 
-class RenderEvent(Event):
-    '''
-    render the screen
-    '''
-    def __init__(self):
-        self.name = 'Render Event'
-
 class ProgramQuitEvent(Event):
     '''
     when we quit the program

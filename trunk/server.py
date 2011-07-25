@@ -159,14 +159,31 @@ class CopyableGameStartedEvent(pb.Copyable, pb.RemoteCopy):
 pb.setUnjellyableForClass(CopyableGameStartedEvent, CopyableGameStartedEvent)
 server_to_client_events.append(CopyableGameStartedEvent)
 
-class CopyableCompleteGameStateEvent(pb.Copyable, pb.RemoteCopy):
+##class CopyableCompleteGameStateEvent(pb.Copyable, pb.RemoteCopy):
+##    '''server to client only'''
+##    def __init__(self, event, object_registry):
+##        self.name = 'Copyable Complete Game State Event'
+##        self.game_state = event.game_state
+##
+##pb.setUnjellyableForClass(CopyableCompleteGameStateEvent, CopyableCompleteGameStateEvent)
+##server_to_client_events.append(CopyableCompleteGameStateEvent)
+
+
+class AbstractCompleteGameStateEvent(object):
     '''server to client only'''
     def __init__(self, event, object_registry):
         self.name = 'Copyable Complete Game State Event'
         self.game_state = event.game_state
 
-pb.setUnjellyableForClass(CopyableCompleteGameStateEvent, CopyableCompleteGameStateEvent)
+class RemoteCompleteGameStateEvent(pb.RemoteCopy, AbstractCompleteGameStateEvent):
+  pass 
+
+class CopyableCompleteGameStateEvent(AbstractCompleteGameStateEvent, pb.Copyable):
+  pass 
+
+pb.setUnjellyableForClass(CopyableCompleteGameStateEvent, RemoteCompleteGameStateEvent)
 server_to_client_events.append(CopyableCompleteGameStateEvent)
+
 
 class CopyableCharacterMoveRequestEvent(pb.Copyable, pb.RemoteCopy):
     def __init__(self, event, object_registry):
@@ -382,6 +399,7 @@ class NetworkClientView(object):
             event_name = testing_event.__class__.__name__
             copyable_class_name = 'Copyable' + event_name
             if copyable_class_name not in copyable_events:
+                print 'ITS NOT IN THE EVENTSSSSSSSSSS'
                 return
             
             copyable_class = copyable_events[copyable_class_name]
@@ -626,7 +644,6 @@ class ProjectileState(GameStateObject):
         self.direction = None # just direction vector
         self.velocity = self.get_velocity()
         
-        self.velocity_has_changed = True
         self.state_changed = True
         # used to remove objects from references.
 
@@ -637,15 +654,13 @@ class ProjectileState(GameStateObject):
         self.id = new_id
 
     def state_has_changed(self):
-        # check if the velocity has changed for package_info
-        if self.velocity_has_changed == True:
-            self.velocity_has_changed = False
-            return True
         # check if the state has changed for package info
-        elif self.state_changed == True:
+        if self.state_changed == True:
             self.state_changed = False
+            # the state has changed
             return True
         else:
+            # the state has not changed
             return False
             
     def package_info(self):
@@ -667,10 +682,10 @@ class ProjectileState(GameStateObject):
             return self.velocity
 
     def _is_dead(self):
+        # make it dead!
         if self.state != 'DEAD':
             self.state = 'DEAD'
             self.velocity = [0,0]
-            self.velocity_has_changed = True
             self.state_changed = True
 
     def _is_dying(self):
@@ -783,6 +798,9 @@ class Game():
         self.object_ids.append(projectile_id)
 
     def _send_complete_game_state(self):
+        '''
+        called every frame, after update complete game state
+        '''
         game_objects_info = []
         for object_id in self.object_ids:
             current_object = self.object_registry[object_id]
@@ -793,6 +811,8 @@ class Game():
             if current_object.state == 'DEAD':
                 self.object_ids.remove(object_id)
                 self.object_registry.pop(object_id)
+            if len(game_objects_info) > 0:
+                print game_objects_info
 
         if not game_objects_info: # if its none
             pass
