@@ -1,3 +1,5 @@
+# generates random items based on an enemy level
+
 import random
 
 class ItemGenerator():

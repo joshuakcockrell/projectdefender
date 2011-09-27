@@ -1,4 +1,5 @@
 ##### RANDOM MAP GENERATOR #####
+# holds the gravity map, the terrain map, the collision map, etc.
 import pygame
 import random
 import math

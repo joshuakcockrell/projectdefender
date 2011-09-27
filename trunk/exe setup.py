@@ -6,6 +6,8 @@
 #
 # To build exe, python, pygame, and py2exe have to be installed. After 
 # building exe none of this libraries are needed.
+
+#todo: figure out how to bundle zope and twisted
  
 try:
     from distutils.core import setup

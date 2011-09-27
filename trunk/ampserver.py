@@ -1,3 +1,5 @@
+# example amp server
+
 from twisted.protocols import amp
 
 class soup(amp.Command):
