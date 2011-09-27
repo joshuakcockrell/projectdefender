@@ -17,7 +17,7 @@ from weakref import WeakKeyDictionary
 
 
 ###############################################################################
-# EVENTS
+# EVENTS #
 
 class Event():
     '''
