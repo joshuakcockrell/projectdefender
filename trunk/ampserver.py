@@ -2,23 +2,27 @@
 
 from twisted.protocols import amp
 
-class soup(amp.Command):
-    arguments = [('message', amp.String())]
+class ReceiveTextMessageEvent(amp.Command):
+    ''' AMP command '''
+    arguments = [('message', amp.AmpList([('name', amp.String()),
+                                          ('text', amp.String())]))]
+    #arguments = [('message', amp.String())] # not using this method
     response = [('response', amp.String())]
 
-class Math(amp.AMP):
+class ClientProtocol(amp.AMP):
+    ''' This is an AMP protocol '''
 
-    def recieve_message(self, message):
-        print 'WE GOT A MESSAGE' + message
-        return {'response': 'Message received: ' + message}
+    def receive_message(self, message):
+        print 'Message received from the client: ' + str(message)
+        return {'response': ''}
 
-    soup.responder(recieve_message)
+    ReceiveTextMessageEvent.responder(receive_message)# do we need this?
 
 def main():
     from twisted.internet import reactor
     from twisted.internet.protocol import Factory
     pf = Factory()
-    pf.protocol = Math
+    pf.protocol = ClientProtocol
     reactor.listenTCP(12345, pf)
     print 'started'
     reactor.run()
