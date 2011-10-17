@@ -5,6 +5,46 @@ import random
 import math
 import time
 
+def convert_position_to_grid_position(position, tile_size):
+    '''
+    steps in this algorithm:
+    x position:
+    31.999
+    
+    divide by tile size to get a number of tile such as:
+    0.99996874999999996
+    
+    floor the position so it becomes:
+    0.0
+    
+    integer form becomes:
+    0
+
+    do the same for the y values
+
+    return [grid_position_x, grid_position_y]
+    '''
+    # calculate for x position
+    float_tile_x = position[0] / tile_size
+    floored_tile_x = math.floor(float_tile_x)
+    grid_position_x = int(floored_tile_x)
+
+    # do the same for the y position
+    float_tile_y = position[1] / tile_size
+    floored_tile_y = math.floor(float_tile_y)
+    grid_position_y = int(floored_tile_y)
+
+    return [grid_position_x, grid_position_y]
+
+def convert_grid_position_to_position(grid_position, tile_size):
+    '''
+    goes from [1,2] to [32,64]
+    '''
+    position_x = grid_position[0] * tile_size
+    position_y = grid_position[1] * tile_size
+
+    return [position_x, position_y]
+
 class Vector():
     '''
     Class:
@@ -37,45 +77,8 @@ class Vector():
         if l != 0:
             return (self.x / l, self.y / l)
         return None
-    
 
 class MapGrid():
-    def __init__(self, map_width, map_height, number_of_rooms,
-                 starting_room_direction,
-                 max_room_width, max_room_height,
-                 min_room_width, min_room_height,
-                 max_hall_length, min_hall_length,
-                 room_size_multiplier, number_of_generations):
-
-        self.number_of_rooms = number_of_rooms
-        self.map_width = map_width
-        self.map_height = map_width
-
-        # create a grid which holds the terrain image information
-        self.empty_terrain_map_grid = self._generate_empty_map_grid(self.map_width, self.map_height)
-        #self.terrain_map_grid = self._generate_terrain_map_random_walk(self.empty_terrain_map_grid)
-
-        self.terrain_map_grid = self._generate_terrain_map_random_rooms(self.empty_terrain_map_grid,
-                                                                        number_of_rooms, starting_room_direction,
-                                                                        max_room_width, max_room_height,
-                                                                        min_room_width, min_room_height,
-                                                                        max_hall_length, min_hall_length,
-                                                                        room_size_multiplier)
-        # generate outside rooms
-        self.empty_outside_terrain_grid = self._generate_empty_noise_grid(self.map_width, self.map_height)
-        self.outside_terrain_grid = self._generate_outside_terrain(self.empty_outside_terrain_grid, number_of_generations)
-        
-        # create a grid which holds the collision tile information
-        self.empty_collision_map_grid = self._generate_empty_map_grid(self.map_width, self.map_height)
-
-        # create a grid which holds the gravitational tile information
-        self.gravity_map_grid = self._generate_empty_gravity_map_grid(self.map_width, self.map_height)
-
-        #gravity_map_grid, gravity_position, radius, force_denometer
-        self.gravity_map_grid = self._add_gravity_point(self.gravity_map_grid, [4,4], 5, 1)
-        #print self.gravity_map_grid
-        # create a grid which holds the flood fill AI influence map
-        self.empty_influence_map_grid = self._generate_empty_map_grid(self.map_width, self.map_height)
 
     def _generate_empty_map_grid(self, map_width, map_height):
         '''
@@ -89,7 +92,7 @@ class MapGrid():
                 new_map_grid[x].append(0) # fill in our rows
 
         return new_map_grid
-
+    
     def _generate_empty_noise_grid(self, map_width, map_height):
         '''
         creates a new 2d array with the given specs
@@ -104,23 +107,7 @@ class MapGrid():
 
         return new_map_grid
 
-    def _generate_empty_gravity_map_grid(self, map_width, map_height):
-        '''
-        creates a new 2d array with the given specs
-        '''
-
-        new_map_grid = [] # create our new list
-        for x in range(map_width):
-            new_map_grid.append([]) # add our columns to the array
-            for y in range(map_height):
-                # fill the grid with empty:
-                #[[velocity], force]
-                new_map_grid[x].append([[0.0,0.0], 0]) # fill in our rows
-                
-
-        return new_map_grid
-
-    def _set_terrain_grid_position_value(self, grid_map, position, value):
+    def _set_grid_position_value(self, grid_map, position, value):
         '''
         sets a position on a grid to a given value,
         used when closing off walls and manually setting values
@@ -129,6 +116,15 @@ class MapGrid():
         grid_map[position[0]][position[1]] = value
 
         return grid_map
+
+    def _get_grid_position_value(self, grid_map, position):
+        '''
+        gets a position on a grid and returns its value
+        '''
+
+        value = grid_map[position[0]][position[1]]
+
+        return value
 
     def _get_random_direction(self):
         '''
@@ -139,72 +135,45 @@ class MapGrid():
 
         return random_direction
 
-    def _generate_outside_terrain(self, empty_outside_terrain_grid, number_of_generations):
-        '''
-        creates a bubble effect with cellular automaton
-        '''
-        grid = empty_outside_terrain_grid
-        number_of_generations = number_of_generations
+class CollisionGrid(MapGrid):
+    '''
+    tiles with a value of 1 are closed
+    tiles with a value of 0 are open
+    '''
+    def __init__(self, map_dimensions):
+        self.map_dimensions = map_dimensions
+        
+        # create a grid which holds the collision tile information
+        self.collision_grid = self._generate_empty_map_grid(self.map_dimensions[0], self.map_dimensions[1])
 
-        for x in range(number_of_generations):
-            next_grid = []
-            for column_index, column in enumerate(grid):
-                next_column = []
-                next_grid.append(next_column)
-                for tile_index, tile in enumerate(column):
-                    
-                    top_left = grid[column_index - 1][tile_index - 1]
-                    top_mid = grid[column_index][tile_index - 1]
-                    try:
-                        top_right = grid[column_index + 1][tile_index - 1]
-                    except IndexError:
-                        top_right = 0
-                    
-                    center_left = grid[column_index - 1][tile_index]
-                    center_mid = grid[column_index][tile_index]
-                    try:
-                        center_right = grid[column_index + 1][tile_index]
-                    except IndexError:
-                        center_right = 0
+    def close_tile(self, grid_position):
+        self.collision_grid = self._set_grid_position_value(self.collision_grid, grid_position, 1)
 
-                    try:
-                        bottom_left = grid[column_index - 1][tile_index + 1]
-                    except IndexError:
-                        bottom_left = 0
-                    try:
-                        bottom_mid = grid[column_index][tile_index + 1]
-                    except IndexError:
-                        bottom_mid = 0
-                    try:
-                        bottom_right = grid[column_index + 1][tile_index + 1]
-                    except IndexError:
-                        bottom_right = 0
+    def open_tile(self, grid_position):
+        self.collision_grid = self._set_grid_position_value(self.collision_grid, grid_position, 0)
 
-                    close_neighbors = (top_mid + center_left + center_mid +
-                                       center_right + bottom_mid)
+    def is_tile_open(self, grid_position):
+        value = self._get_grid_position_value(self.collision_grid, grid_position)
+        if value == 1:
+            # the tile is closed
+            return False
+        elif value == 0:
+            # the tile is open
+            return True
+    
+class TerrainGrid(MapGrid):
 
-                    far_neighbors = (top_left + top_right +
-                                     bottom_left + bottom_right)
+    def __init__(self):
+        # create a grid which holds the terrain image information
+        self.empty_terrain_map_grid = self._generate_empty_map_grid(self.map_width, self.map_height)
+        #self.terrain_map_grid = self._generate_terrain_map_random_walk(self.empty_terrain_map_grid)
 
-                    number_of_neighbors = close_neighbors + far_neighbors
-
-                    if number_of_neighbors > random.choice([3,4,5]):
-                        next_cell = 1
-
-                    else:
-                        next_cell = 0
-
-                    if close_neighbors > 3:
-                        next_cell = 1
-
-                    next_column.append(next_cell)
-            grid = next_grid
-
-                    
-                    
-                    
-        return next_grid
-
+        self.terrain_map_grid = self._generate_terrain_map_random_rooms(self.empty_terrain_map_grid,
+                                                                        number_of_rooms, starting_room_direction,
+                                                                        max_room_width, max_room_height,
+                                                                        min_room_width, min_room_height,
+                                                                        max_hall_length, min_hall_length,
+                                                                        room_size_multiplier)
     def _generate_terrain_map_random_walk(self, empty_terrain_map_grid):
         '''
         fills up our terrain grid with rooms.
@@ -331,50 +300,6 @@ class MapGrid():
                 self.current_room_number += 1
         
         return terrain_map_grid
-
-
-    def _get_hall_start_position(self, terrain_map_grid, direction):
-        '''
-        goes through the terrain grid and returns positions of walls that
-        use the given direction.
-        '''
-        directions = {'right': 3, 'up': 4, 'left': 5, 'down': 6}
-        # loop through the terrain map
-        for column_index, column in enumerate(terrain_map_grid):
-            for tile_index, tile_value in enumerate(column):
-                # check if the current tile is correct for the direction we want to move
-                if tile_value == directions[direction]:
-                    print 'hall wants to start on direction:'
-                    print direction
-                    start_position = [column_index, tile_index]
-                    print 'start position generated'
-                    print start_position
-                    return start_position
-
-        # we did not find any rooms with that direction available
-        return False
-                
-    def _get_hall_end_position(self, hall_start_position, hall_direction, hall_distance):
-        '''
-        uses the hall start position and the hall end position
-        to get the ending hall position
-        '''
-        print 'hall starting position in hall end position function'
-        print hall_start_position
-        if hall_direction == 'right':
-            # get the end position to the right
-            hall_end_position = [hall_start_position[0] + hall_distance, hall_start_position[1]]
-        elif hall_direction == 'up':
-            # get the end position to the up
-            hall_end_position = [hall_start_position[0], hall_start_position[1] - hall_distance]
-        elif hall_direction == 'left':
-            # get the end position to the left
-            hall_end_position = [hall_start_position[0] - hall_distance, hall_start_position[1]]
-        elif hall_direction == 'down':
-            # get the end position to the down
-            hall_end_position = [hall_start_position[0], hall_start_position[1] + hall_distance]
-            
-        return hall_end_position
 
     def _area_is_empty_of_terrain(self, terrain_map_grid, hall_start_position, hall_direction,
                                  hall_distance, room_width, room_height,
@@ -641,6 +566,49 @@ class MapGrid():
         # if it has not returned False, then...
         print 'THERE ARE NO WALLS WERE RUNNING INTO'
         return True
+
+    def _get_hall_start_position(self, terrain_map_grid, direction):
+        '''
+        goes through the terrain grid and returns positions of walls that
+        use the given direction.
+        '''
+        directions = {'right': 3, 'up': 4, 'left': 5, 'down': 6}
+        # loop through the terrain map
+        for column_index, column in enumerate(terrain_map_grid):
+            for tile_index, tile_value in enumerate(column):
+                # check if the current tile is correct for the direction we want to move
+                if tile_value == directions[direction]:
+                    print 'hall wants to start on direction:'
+                    print direction
+                    start_position = [column_index, tile_index]
+                    print 'start position generated'
+                    print start_position
+                    return start_position
+
+        # we did not find any rooms with that direction available
+        return False
+                
+    def _get_hall_end_position(self, hall_start_position, hall_direction, hall_distance):
+        '''
+        uses the hall start position and the hall end position
+        to get the ending hall position
+        '''
+        print 'hall starting position in hall end position function'
+        print hall_start_position
+        if hall_direction == 'right':
+            # get the end position to the right
+            hall_end_position = [hall_start_position[0] + hall_distance, hall_start_position[1]]
+        elif hall_direction == 'up':
+            # get the end position to the up
+            hall_end_position = [hall_start_position[0], hall_start_position[1] - hall_distance]
+        elif hall_direction == 'left':
+            # get the end position to the left
+            hall_end_position = [hall_start_position[0] - hall_distance, hall_start_position[1]]
+        elif hall_direction == 'down':
+            # get the end position to the down
+            hall_end_position = [hall_start_position[0], hall_start_position[1] + hall_distance]
+            
+        return hall_end_position
         
 
 
@@ -802,6 +770,103 @@ class MapGrid():
             
         return terrain_map_grid
 
+class OutsideTerrainGrid(MapGrid):
+    def __init__(self, map_dimensions):
+
+        # generate outside rooms
+        self.empty_outside_terrain_grid = self._generate_empty_noise_grid(self.map_width, self.map_height)
+        self.outside_terrain_grid = self._generate_outside_terrain(self.empty_outside_terrain_grid, number_of_generations)
+
+    def _generate_outside_terrain(self, empty_outside_terrain_grid, number_of_generations):
+        '''
+        creates a bubble effect with cellular automaton
+        '''
+        grid = empty_outside_terrain_grid
+        number_of_generations = number_of_generations
+
+        for x in range(number_of_generations):
+            next_grid = []
+            for column_index, column in enumerate(grid):
+                next_column = []
+                next_grid.append(next_column)
+                for tile_index, tile in enumerate(column):
+                    
+                    top_left = grid[column_index - 1][tile_index - 1]
+                    top_mid = grid[column_index][tile_index - 1]
+                    try:
+                        top_right = grid[column_index + 1][tile_index - 1]
+                    except IndexError:
+                        top_right = 0
+                    
+                    center_left = grid[column_index - 1][tile_index]
+                    center_mid = grid[column_index][tile_index]
+                    try:
+                        center_right = grid[column_index + 1][tile_index]
+                    except IndexError:
+                        center_right = 0
+
+                    try:
+                        bottom_left = grid[column_index - 1][tile_index + 1]
+                    except IndexError:
+                        bottom_left = 0
+                    try:
+                        bottom_mid = grid[column_index][tile_index + 1]
+                    except IndexError:
+                        bottom_mid = 0
+                    try:
+                        bottom_right = grid[column_index + 1][tile_index + 1]
+                    except IndexError:
+                        bottom_right = 0
+
+                    close_neighbors = (top_mid + center_left + center_mid +
+                                       center_right + bottom_mid)
+
+                    far_neighbors = (top_left + top_right +
+                                     bottom_left + bottom_right)
+
+                    number_of_neighbors = close_neighbors + far_neighbors
+
+                    if number_of_neighbors > random.choice([3,4,5]):
+                        next_cell = 1
+
+                    else:
+                        next_cell = 0
+
+                    if close_neighbors > 3:
+                        next_cell = 1
+
+                    next_column.append(next_cell)
+            grid = next_grid         
+                    
+                    
+        return next_grid
+
+    
+class GravityGrid(MapGrid):
+    def __init__(self, map_dimensions):
+
+        # create a grid which holds the gravitational tile information
+        self.gravity_map_grid = self._generate_empty_gravity_map_grid(self.map_width, self.map_height)
+
+        #gravity_map_grid, gravity_position, radius, force_denometer
+        self.gravity_map_grid = self._add_gravity_point(self.gravity_map_grid, [4,4], 5, 1)
+        #print self.gravity_map_grid
+
+    def _generate_empty_gravity_map_grid(self, map_width, map_height):
+        '''
+        creates a new 2d array with the given specs
+        '''
+
+        new_map_grid = [] # create our new list
+        for x in range(map_width):
+            new_map_grid.append([]) # add our columns to the array
+            for y in range(map_height):
+                # fill the grid with empty:
+                #[[velocity], force]
+                new_map_grid[x].append([[0.0,0.0], 0]) # fill in our rows
+                
+
+        return new_map_grid
 
     def _add_gravity_point(self, gravity_map_grid, gravity_position, radius, force_denometer):
         gravity_position_vector = Vector(gravity_position[0], gravity_position[1])
@@ -835,6 +900,25 @@ class MapGrid():
                 gravity_map_grid[current_position[0]][current_position[1]] = [normalized_distance, force_of_gravity]
 
         return gravity_map_grid
+        
+
+class AIGrid(MapGrid):
+    def __init__(self, map_dimensions):
+        # create a grid which holds the flood fill AI influence map
+        self.empty_influence_map_grid = self._generate_empty_map_grid(self.map_width, self.map_height)
+    
+
+class MapGrid():
+    def __init__(self, map_width, map_height, number_of_rooms,
+                 starting_room_direction,
+                 max_room_width, max_room_height,
+                 min_room_width, min_room_height,
+                 max_hall_length, min_hall_length,
+                 room_size_multiplier, number_of_generations):
+
+        self.number_of_rooms = number_of_rooms
+        self.map_width = map_width
+        self.map_height = map_width
     
 
 
