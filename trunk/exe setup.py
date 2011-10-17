@@ -47,11 +47,11 @@ class pygame2exe(py2exe.build_exe.py2exe): #This hack make sure that pygame defa
 class BuildExe:
     def __init__(self):
         #Name of starting .py
-        self.script = os.path.join('2D Cellular Automaton Simulation.py')
+        self.script = os.path.join('ampclient.py')
         #self.script = 'C:\Documents and Settings\HP_Administrator\Desktop\Color Tower Defense\Scripts\Color Tower Defense.py'
  
         #Name of program
-        self.project_name = 'Cellular Automaton'
+        self.project_name = 'defender'
  
         #Project url
         self.project_url = "madcloudgames.blogspot.com"
@@ -104,7 +104,11 @@ class BuildExe:
         self.exclude_dll = ['']
 
         #python scripts to be included seperated by a comma
-        self.extra_scripts = []
+        self.extra_scripts = ['ampserver', 'clientnetworkportal', 'events',
+                              'itemgenerator', 'mapgrid', 'serverfactory','userinputmanager',
+                              'twisted.protocols.amp', 'twisted.internet', 'twisted.protocols',
+                              'twisted.internet.protocol',
+                              'zope.interface']
  
         #Zip file name (None will bundle files in exe instead of zip file)
         self.zipfile_name = None
