@@ -378,7 +378,7 @@ class CPUSpinnerController():
         '''
         calculates fps
         '''
-        fps = 1.0 / delta_time
+        fps = 1.0 / delta_time 
         return fps
         
             
@@ -484,7 +484,8 @@ class KeyboardController():
 
 
 class CharacterSprite(pygame.sprite.Sprite):
-    def __init__(self, character_id, position, velocity, object_state, sprite_stats_directory, group=None):
+    def __init__(self, character_id, position, velocity, object_state,
+                 sprite_stats_directory, group=None):
         pygame.sprite.Sprite.__init__(self, group)
         self.id = character_id
 
@@ -605,7 +606,6 @@ class PygameView():
     def _update_game_state(self, game_state):
         # recieved a list of game objects (characters, projectiles, etc...)
         # example of game state list
-        # 6
         # [['CHARACTER', 19376408, [300, 300]], ['CHARACTER', 19377248, [300, 300]]]
 
         print self.object_registry
@@ -668,9 +668,12 @@ class PygameView():
         for c in self.character_sprites:
             return c
 
-    def _create_new_character_sprite(self, character_id, position, projectile_velocity, object_state, object_is_user_controlled):
+    def _create_new_character_sprite(self, character_id, position, projectile_velocity,
+                                     object_state, object_is_user_controlled):
         #create the new sprite
-        newCharacterSprite = CharacterSprite(character_id, position, projectile_velocity, object_state, self.sprite_stats_directory, self.character_sprites)
+        newCharacterSprite = CharacterSprite(character_id, position, projectile_velocity,
+                                             object_state, self.sprite_stats_directory,
+                                             self.character_sprites)
         self.all_sprites.append(newCharacterSprite)
         #assign the registry slot to the character sprite
         self.object_registry[character_id] = newCharacterSprite
@@ -713,7 +716,7 @@ class PygameView():
             if event.mouse_button in ['LEFT']:
                 target_position = event.mouse_position
                 self._user_wants_to_shoot_projectile(target_position)
-            
+                
 
 def main():
     print '############################################'
