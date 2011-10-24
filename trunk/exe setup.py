@@ -31,7 +31,6 @@ def isSystemDLL(pathname):
 py2exe.build_exe.isSystemDLL = isSystemDLL
 
 
-##### MIXER HACK ABOVE #####
 
 class pygame2exe(py2exe.build_exe.py2exe): #This hack make sure that pygame default font is copied: no need to modify code for specifying default font
     def copy_extensions(self, extensions):
