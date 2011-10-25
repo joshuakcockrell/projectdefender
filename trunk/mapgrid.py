@@ -900,12 +900,22 @@ class GravityGrid(MapGrid):
                 gravity_map_grid[current_position[0]][current_position[1]] = [normalized_distance, force_of_gravity]
 
         return gravity_map_grid
+<<<<<<< .mine
+        
+
+class AIGrid(MapGrid):
+    def __init__(self, map_dimensions):
+        self.map_dimensions = map_dimensions
+        # create a grid which holds the flood fill AI influence map
+        self.empty_influence_map_grid = self._generate_empty_map_grid(self.map_dimensions[0], self.map_dimensions[1])
+=======
         
 
 class AIGrid(MapGrid):
     def __init__(self, map_dimensions):
         # create a grid which holds the flood fill AI influence map
         self.empty_influence_map_grid = self._generate_empty_map_grid(self.map_width, self.map_height)
+>>>>>>> .r40
     
 
 class MapGrid():
