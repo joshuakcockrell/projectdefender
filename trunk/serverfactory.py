@@ -54,11 +54,7 @@ class RemoteCompleteGameStateRequestEvent(amp.Command):
                                           ('object_position', amp.ListOf(amp.Integer())),
                                           ('object_velocity', amp.ListOf(amp.Float())),
                                           ('object_state', amp.String())]))]
-    '''
-    response = [('response', amp.AmpList([('object_type', amp.String()),
-                                          ('object_id', amp.Integer()),
-                                          ('object_state', amp.String())]))]
-    '''
+    
 class ClientConnectionProtocol(amp.AMP):
     '''
     This is an AMP protocol
@@ -113,17 +109,19 @@ class ClientConnectionProtocol(amp.AMP):
         #print self.game_state
         if self.game_state:
             return {'response': self.game_state}
+        else:
+            raise RuntimeWarning
     RemoteCompleteGameStateRequestEvent.responder(remote_complete_game_state_request_event)
 
     def remote_character_move_request_event(self, message):
         event = events.CharacterMoveRequestEvent()
     
     def update_game_state(self, event):
-        self.game_state = event
+        self.game_state = event.character_states
         
     def notify(self, event):
         if event.name == 'Character States Event':
-            self.game_state = event.character_states
+            self.update_game_state(event)
             
     
             
