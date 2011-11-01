@@ -5,6 +5,9 @@ import random
 import math
 import time
 
+# used in the aigrid pending sources to active sources transfer
+from collections import deque
+
 def convert_position_to_grid_position(position, tile_size):
     '''
     steps in this algorithm:
@@ -107,22 +110,22 @@ class MapGrid():
 
         return new_map_grid
 
-    def _set_grid_position_value(self, grid_map, position, value):
+    def _set_grid_position_value(self, grid, position, value):
         '''
         sets a position on a grid to a given value,
         used when closing off walls and manually setting values
         '''
 
-        grid_map[position[0]][position[1]] = value
+        grid[position[0]][position[1]] = value
 
-        return grid_map
+        return grid
 
-    def _get_grid_position_value(self, grid_map, position):
+    def _get_grid_position_value(self, grid, position):
         '''
         gets a position on a grid and returns its value
         '''
 
-        value = grid_map[position[0]][position[1]]
+        value = grid[position[0]][position[1]]
 
         return value
 
@@ -134,6 +137,7 @@ class MapGrid():
         random_direction = random.choice(['right', 'up', 'left', 'down'])
 
         return random_direction
+                    
 
 class CollisionGrid(MapGrid):
     '''
@@ -900,24 +904,426 @@ class GravityGrid(MapGrid):
                 gravity_map_grid[current_position[0]][current_position[1]] = [normalized_distance, force_of_gravity]
 
         return gravity_map_grid
-<<<<<<< .mine
-        
+
+class AIGridSource():
+    def __init__(self, grid_position, max_generations, current_generation, strength):
+        self.grid_position = grid_position
+        self.max_generations = max_generations
+        self.current_generation = current_generation
+        self.strength = strength # how much the sources children will be incremented by
+
+    def update_values(self, grid_position, max_generations, next_generation, strength):
+        self.grid_position = grid_position
+        self.max_generations = max_generations
+        self.current_generation = next_generation
+        self.strength = strength
 
 class AIGrid(MapGrid):
     def __init__(self, map_dimensions):
+        ''' This holds the movement priority list for the AI
+
+        This uses a floodfill algorithm to fill the grid
+
+        0 = Not yet assigned enemies will not go here
+        1 = target enemies will reach the closest one of these
+        2 - infinite = enemies will look for the nearest lower number
+
+        how this will work
+        add source to grid
+
+        every frame
+        tiles tagged as uncomplete use as source, source spawns sources
+
+        for nearby
+        if nearby is == to source
+        end source
+
+        if nearby are higher than source + 1
+        then make nearby source + 1
+        end source
+        make new source at nearby
+
+        if nearby are lower than source
+        can nearby be lower than source - 1?
+        end source
+        
+        '''
         self.map_dimensions = map_dimensions
-        # create a grid which holds the flood fill AI influence map
-        self.empty_influence_map_grid = self._generate_empty_map_grid(self.map_dimensions[0], self.map_dimensions[1])
-=======
+        self.active_sources = []
+        #self.pending_active_sources = []
+        self.pending_active_sources = deque()
+        self.cached_sources = []
+        self.sources_to_be_depreciated = []
+
+        self.source_max_generations = 10
+
         
-
-class AIGrid(MapGrid):
-    def __init__(self, map_dimensions):
         # create a grid which holds the flood fill AI influence map
-        self.empty_influence_map_grid = self._generate_empty_map_grid(self.map_width, self.map_height)
->>>>>>> .r40
-    
+        self.grid = self._generate_empty_map_grid(self.map_dimensions[0], self.map_dimensions[1])
 
+    def add_source_to_grid(self, center_grid_position, strength, max_generations):
+        # set a new source
+        current_generation = 1 # starts at 1
+        aiGridSource = AIGridSource(center_grid_position, max_generations, current_generation, strength)
+        self.pending_active_sources.append(aiGridSource)
+
+    def remove_target_from_grid(self, center_grid_position):
+        self.grid[center_grid_position[0]][center_grid_position[1]] = 0
+
+                
+    def get_target_grid_position(self, center_grid_position):
+
+        # get all 9 nearby tiles
+        (top_left, top_mid, top_right,
+         center_left, center_mid, center_right,
+         bottom_left, bottom_mid, bottom_right) = self._get_surrounding_tiles(center_grid_position[0], center_grid_position[1])
+
+        # sort them so we know which is the least
+        tiles = [['top left', top_left], ['top mid', top_mid], ['top right', top_right],
+                 ['center left', center_left], ['center mid', center_mid], ['center right', center_right],
+                 ['bottom left', bottom_left], ['bottom mid', bottom_mid], ['bottom right' , bottom_right]]
+
+        # get rid of all the tiles with the value of zero
+        good_indexes = []
+        good_tiles = []
+        for i, t in enumerate(tiles):
+            if t[1] > 0:
+                good_indexes.append(i)
+        for i in good_indexes:
+            good_tiles.append(tiles[i])
+        tiles = good_tiles
+                              
+        sorted_tiles = sorted(tiles, key=lambda tile: tile[1])
+        print 'sorted tiles:'
+        print sorted_tiles
+        if len(sorted_tiles) >= 1: # if any tiles exist in the list
+                
+            # decide what tile is the target
+            x = center_grid_position[0]
+            y = center_grid_position[1]
+            if sorted_tiles[0][0] == 'top left':
+                target_tile = [x - 1, y - 1]
+            elif sorted_tiles[0][0] == 'top mid':
+                target_tile = [x, y - 1]
+            elif sorted_tiles[0][0] == 'top right':
+                target_tile = [x + 1, y - 1]
+            elif sorted_tiles[0][0] == 'center left':
+                target_tile = [x - 1, y]
+            elif sorted_tiles[0][0] == 'center mid':
+                target_tile = [x, y]
+            elif sorted_tiles[0][0] == 'center right':
+                target_tile = [x + 1, y]
+            elif sorted_tiles[0][0] == 'bottom left':
+                target_tile = [x - 1, y + 1]
+            elif sorted_tiles[0][0] == 'bottom mid':
+                target_tile = [x, y + 1]
+            elif sorted_tiles[0][0] == 'bottom right':
+                target_tile = [x + 1, y + 1]
+            else:
+                raise Exception('Tiles sorted incorrectly! ' + str(sorted_tiles))
+        else:
+            target_tile = None
+
+        print target_tile
+        print sorted_tiles
+
+        return target_tile
+        
+    def _get_surrounding_tiles(self, column_index, tile_index):
+        # get the surrounding tile values for each tile
+        x = column_index
+        y = tile_index
+
+        ##### TOP ROW #####
+            
+        # if too far up
+        if y - 1 < 0:
+            top_left = None
+            top_mid = None
+            top_right = None
+        else:
+            
+            # TOP LEFT
+            # if too far left 
+            if x - 1 < 0:
+                top_left = None
+            else:
+                try:
+                    top_left = self.grid[x - 1][y - 1]
+                # handle too far right or down
+                except IndexError:
+                    top_left = None
+            
+
+            # TOP MID
+            # if too far left
+            if x < 0:
+                top_mid = None
+
+            else:
+                try:
+                    top_mid = self.grid[x][y - 1]
+                # if too far right or down
+                except IndexError:
+                    top_mid = None
+
+            # TOP RIGHT
+            # if too far left
+            if x + 1 < 0:
+                top_right = None
+            else:
+                try:
+                    top_right = self.grid[x + 1][y - 1]
+                except IndexError:
+                    top_right = None
+                    
+
+        ##### CENTER ROW #####
+
+        # if too far up
+        if y < 0:
+            center_left = None
+            center_mid = None
+            center_right = None
+
+        else:
+            # CENTER LEFT
+            # if too far left
+            if x - 1 < 0:
+                center_left = None
+            else:
+                try:
+                    center_left = self.grid[x - 1][y]
+                    # if too far right or down
+                except IndexError:
+                    center_left = None
+
+            # CENTER MID
+            # if too far left
+            if x < 0:
+                center_mid = None
+            else:
+                try:
+                    center_mid = self.grid[x][y]
+                # if too far right or down
+                except IndexError:
+                    center_mid = None
+
+            # CENTER RIGHT
+            # if too far left
+            if x + 1 < 0:
+                center_right = None
+            else:
+                try:
+                    center_right = self.grid[x + 1][y]
+                # if too far right or down
+                except IndexError:
+                    center_right = None
+                    
+
+        ##### BOTTOM ROW #####
+
+        # if too far up
+        if y + 1 < 0:
+            bottom_left = None
+            bottom_mid = None
+            bottom_right = None
+        else:
+            # BOTTOM LEFT
+            # if too far left
+            if x - 1 < 0:
+                bottom_left = None
+            else:
+                try:
+                    bottom_left = self.grid[x - 1][y + 1]
+                # if too far right or down
+                except IndexError:
+                    bottom_left = None
+
+            # BOTTOM MID
+            # if too far left
+            if x < 0:
+                bottom_mid = None
+            else:
+                try:
+                    bottom_mid = self.grid[x][y + 1]
+                # if too far right or down
+                except IndexError:
+                    bottom_mid = None
+
+            # BOTTOM RIGHT
+            # if too far left
+            if x + 1 < 0:
+                bottom_right = None
+            else:
+                try:
+                    bottom_right = self.grid[x + 1][y + 1]
+                # if too far right or down
+                except IndexError:
+                    bottom_right = None
+        return (top_left, top_mid, top_right,
+                center_left, center_mid, center_right,
+                bottom_left, bottom_mid, bottom_right)
+
+
+    def get_cached_source(self):
+        ''' returns the first cached source (if there is one) '''
+        
+        if len(self.cached_sources) >= 1:
+            source = self.cached_sources[0]
+            self.cached_sources.remove(source)
+            return source
+        else:
+            return None
+
+    def update(self):
+        ''' Goes through all the active sources and updates their surroundings'''
+        print 'ACTIVE SOURCES'
+        for a in self.active_sources:
+            print a.grid_position
+        print 'PENDING SOURCES'
+        for p in self.pending_active_sources:
+            print p.grid_position
+        self.active_sources.extend(self.pending_active_sources)
+        print 'ACTIVE SOURCES AFTER PENDING ADDED'
+        for a in self.active_sources:
+            print a.grid_position
+
+        for s in self.sources_to_be_depreciated:
+            print 'source DEPRECIATED: ' + str(s.grid_position)
+            self.active_sources.remove(s)
+            self.cached_sources.append(s)
+        self.sources_to_be_depreciated = []
+        
+        '''
+        for p in self.pending_active_sources:
+            # transfer our pending sources over to be checked
+            self.active_sources.append(p)
+        '''
+        self.pending_active_sources = [] # reset our list
+
+        sources_to_be_removed = []
+        print 'new list of active sources: SOURCE NUMBER: ' + str(len(self.active_sources))
+        for s in self.active_sources:
+            next_generation = s.current_generation + 1
+            if next_generation > s.max_generations:
+                self.sources_to_be_depreciated.append(s)
+                # change this so its not in the middle
+            else:
+                x = s.grid_position[0]
+                y = s.grid_position[1]
+                source_value = s.current_generation * s.strength
+                print 'NEW SOURCE. Position:' + str(x) + ' ' + str(y)
+                print 'SETTING source value:'
+                print source_value
+                print 'new grid'
+                self.grid[x][y] = source_value # set the value
+                print self.grid
+                #time.sleep(1)
+                print '----------'
+                print 'NEW SURROUNDINGS BEING TESTED'
+                print 'checking surroundings of previously placed tile at pos:'
+                print x, y
+                
+                # get all 9 nearby tiles
+                (top_left, top_mid, top_right,
+                 center_left, center_mid, center_right,
+                 bottom_left, bottom_mid, bottom_right) = self._get_surrounding_tiles(x, y)
+                print 'test center right3'
+                print center_right
+                '''
+                # top left
+                if top_left > (source_value + s.strength) or top_left == 0:
+                    aiGridSource = self.get_cached_source()
+                    if aiGridSource:
+                        aiGridSource.update_values([x - 1, y - 1], s.max_generations, next_generation, s.strength)           
+                    else:
+                        aiGridSource = AIGridSource([x - 1, y - 1], s.max_generations, next_generation, s.strength)
+                    self.active_sources.append(aiGridSource)
+                '''
+                # top mid
+                if top_mid > (source_value + s.strength) or top_mid == 0:
+                    print 'target ADD: up mid: ' + str(top_mid)
+                    aiGridSource = self.get_cached_source()
+                    if aiGridSource:
+                        aiGridSource.update_values([x, y - 1], s.max_generations, next_generation, s.strength)
+                    else:
+                        aiGridSource = AIGridSource([x, y - 1], s.max_generations, next_generation, s.strength)
+                    self.pending_active_sources.append(aiGridSource)
+                '''
+                # top right
+                if top_right > (source_value + s.strength) or top_right == 0:
+                    aiGridSource = self.get_cached_source()
+                    if aiGridSource:
+                        aiGridSource.update_values([x + 1, y - 1], s.max_generations, next_generation, s.strength)
+                    else:
+                        aiGridSource = AIGridSource([x + 1, y - 1], s.max_generations, next_generation, s.strength)
+                    self.active_sources.append(aiGridSource)
+                '''
+                # center left
+                if center_left > (source_value + s.strength) or center_left == 0:
+                    print 'target ADD: center left: ' + str(center_left)
+                    aiGridSource = self.get_cached_source()
+                    if aiGridSource:
+                        aiGridSource.update_values([x - 1, y], s.max_generations, next_generation, s.strength)
+                    else:
+                        aiGridSource = AIGridSource([x - 1, y], s.max_generations, next_generation, s.strength)
+                    self.pending_active_sources.append(aiGridSource)
+                '''   
+                # center mid      
+                if center_mid > (source_value + s.strength) or center_mid == 0:
+                    aiGridSource = self.get_cached_source()
+                    if aiGridSource:
+                        aiGridSource.update_values([x, y], s.max_generations, next_generation, s.strength)
+                    else:
+                        aiGridSource = AIGridSource([x, y], s.max_generations, next_generation, s.strength)
+                    self.active_sources.append(aiGridSource)
+                '''    
+                # center right        
+                if center_right > (source_value + s.strength) or center_right == 0:
+                    print 'target ADD: center right: ' + str(center_right)
+                    aiGridSource = self.get_cached_source()
+                    if aiGridSource:
+                        aiGridSource.update_values([x + 1, y], s.max_generations, next_generation, s.strength)
+                    else:
+                        aiGridSource = AIGridSource([x + 1, y], s.max_generations, next_generation, s.strength)
+                    self.pending_active_sources.append(aiGridSource)
+                ''' 
+                # bottom left        
+                if bottom_left > (source_value + s.strength) or bottom_left == 0:
+                    aiGridSource = self.get_cached_source()
+                    if aiGridSource:
+                        aiGridSource.update_values([x - 1, y + 1], s.max_generations, next_generation, s.strength)
+                    else:
+                        aiGridSource = AIGridSource([x - 1, y + 1], s.max_generations, next_generation, s.strength)
+                    self.active_sources.append(aiGridSource)
+                '''  
+                # bottom mid      
+                if bottom_mid > (source_value + s.strength) or bottom_mid == 0:
+                    print 'target ADD: bottom mid: ' + str(bottom_mid)
+                    aiGridSource = self.get_cached_source()
+                    if aiGridSource:
+                        aiGridSource.update_values([x, y + 1], s.max_generations, next_generation, s.strength)
+                    else:
+                        aiGridSource = AIGridSource([x, y + 1], s.max_generations, next_generation, s.strength)
+                    self.pending_active_sources.append(aiGridSource)
+                '''   
+                # bottom right      
+                if bottom_right > (source_value + s.strength) or bottom_right == 0:
+                    aiGridSource = self.get_cached_source()
+                    if aiGridSource:
+                        aiGridSource.update_values([x + 1, y + 1], s.max_generations, next_generation, s.strength)
+                    else:
+                        aiGridSource = AIGridSource([x + 1, y + 1], s.max_generations, next_generation, s.strength)
+                    self.active_sources.append(aiGridSource)
+                '''   
+                # cache our old source to save some memory
+
+                # ISSUE
+                self.sources_to_be_depreciated.append(s)
+                print 'source surroundings added to list'
+
+        
 class MapGrid():
     def __init__(self, map_width, map_height, number_of_rooms,
                  starting_room_direction,
@@ -958,6 +1364,7 @@ if __name__ == '__main__':
                        min_room_width, min_room_height,
                        max_hall_length, min_hall_length,
                        room_size_multiplier, number_of_generations)
+
     #print map_grid.outside_terrain_grid
 
     pygame.init()
