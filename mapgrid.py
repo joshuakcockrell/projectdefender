@@ -906,17 +906,21 @@ class GravityGrid(MapGrid):
         return gravity_map_grid
 
 class AIGridSource():
-    def __init__(self, grid_position, max_generations, current_generation, strength):
+    def __init__(self, grid_position, strength, max_generations, next_generation):
         self.grid_position = grid_position
         self.max_generations = max_generations
-        self.current_generation = current_generation
+        self.current_generation = next_generation
         self.strength = strength # how much the sources children will be incremented by
 
-    def update_values(self, grid_position, max_generations, next_generation, strength):
+    def update_values(self, grid_position, strength, max_generations, next_generation):
         self.grid_position = grid_position
         self.max_generations = max_generations
         self.current_generation = next_generation
         self.strength = strength
+
+def run_test():
+    pass
+    
 
 class AIGrid(MapGrid):
     def __init__(self, map_dimensions):
@@ -950,25 +954,33 @@ class AIGrid(MapGrid):
         '''
         self.map_dimensions = map_dimensions
         self.active_sources = []
-        #self.pending_active_sources = []
-        self.pending_active_sources = deque()
-        self.cached_sources = []
+        self.pending_active_sources = []
+        #self.pending_active_sources = deque()
+        #self.cached_sources = []
+        self.cached_sources = deque()
         self.sources_to_be_depreciated = []
-
-        self.source_max_generations = 10
 
         
         # create a grid which holds the flood fill AI influence map
         self.grid = self._generate_empty_map_grid(self.map_dimensions[0], self.map_dimensions[1])
 
-    def add_source_to_grid(self, center_grid_position, strength, max_generations):
-        # set a new source
-        current_generation = 1 # starts at 1
-        aiGridSource = AIGridSource(center_grid_position, max_generations, current_generation, strength)
+    def add_source_to_grid(self, center_grid_position, strength, max_generations, next_generation):
+        aiGridSource = self.get_cached_source()
+        if aiGridSource:
+            aiGridSource.update_values(center_grid_position, strength, max_generations, next_generation)
+        else:
+            aiGridSource = AIGridSource(center_grid_position, strength, max_generations, next_generation)
         self.pending_active_sources.append(aiGridSource)
 
     def remove_target_from_grid(self, center_grid_position):
         self.grid[center_grid_position[0]][center_grid_position[1]] = 0
+
+    def is_target_final(self, target_grid_position):
+        if target_grid_position:
+            target_position_value = self._get_grid_position_value(self.grid, target_grid_position)
+            if target_position_value == 1:
+                # target is final
+                return True
 
                 
     def get_target_grid_position(self, center_grid_position):
@@ -994,8 +1006,14 @@ class AIGrid(MapGrid):
         tiles = good_tiles
                               
         sorted_tiles = sorted(tiles, key=lambda tile: tile[1])
+        '''
         print 'sorted tiles:'
         print sorted_tiles
+        '''
+
+        target_value = 0
+        target_destination = None
+        
         if len(sorted_tiles) >= 1: # if any tiles exist in the list
                 
             # decide what tile is the target
@@ -1003,29 +1021,49 @@ class AIGrid(MapGrid):
             y = center_grid_position[1]
             if sorted_tiles[0][0] == 'top left':
                 target_tile = [x - 1, y - 1]
+                target_value = sorted_tiles[0][1]
+                target_destination = sorted_tiles[0][0]
             elif sorted_tiles[0][0] == 'top mid':
                 target_tile = [x, y - 1]
+                target_value = sorted_tiles[0][1]
+                target_destination = sorted_tiles[0][0]
             elif sorted_tiles[0][0] == 'top right':
                 target_tile = [x + 1, y - 1]
+                target_value = sorted_tiles[0][1]
+                target_destination = sorted_tiles[0][0]
             elif sorted_tiles[0][0] == 'center left':
                 target_tile = [x - 1, y]
+                target_value = sorted_tiles[0][1]
+                target_destination = sorted_tiles[0][0]
             elif sorted_tiles[0][0] == 'center mid':
                 target_tile = [x, y]
+                target_value = sorted_tiles[0][1]
+                target_destination = sorted_tiles[0][0]
             elif sorted_tiles[0][0] == 'center right':
                 target_tile = [x + 1, y]
+                target_value = sorted_tiles[0][1]
+                target_destination = sorted_tiles[0][0]
             elif sorted_tiles[0][0] == 'bottom left':
                 target_tile = [x - 1, y + 1]
+                target_value = sorted_tiles[0][1]
+                target_destination = sorted_tiles[0][0]
             elif sorted_tiles[0][0] == 'bottom mid':
                 target_tile = [x, y + 1]
+                target_value = sorted_tiles[0][1]
+                target_destination = sorted_tiles[0][0]
             elif sorted_tiles[0][0] == 'bottom right':
                 target_tile = [x + 1, y + 1]
+                target_value = sorted_tiles[0][1]
+                target_destination = sorted_tiles[0][0]
             else:
                 raise Exception('Tiles sorted incorrectly! ' + str(sorted_tiles))
         else:
             target_tile = None
-
-        print target_tile
-        print sorted_tiles
+        '''
+        print 'target tile ' + str(target_tile)
+        print 'target value ' + str(target_value)
+        print 'target destination ' + str(target_destination)
+        '''
 
         return target_tile
         
@@ -1169,68 +1207,70 @@ class AIGrid(MapGrid):
     def get_cached_source(self):
         ''' returns the first cached source (if there is one) '''
         
-        if len(self.cached_sources) >= 1:
-            source = self.cached_sources[0]
-            self.cached_sources.remove(source)
+        if self.cached_sources:
+            source = self.cached_sources.popleft()
+
+            #source = self.cached_sources[0]
+            #self.cached_sources.remove(source)
             return source
         else:
             return None
 
     def update(self):
         ''' Goes through all the active sources and updates their surroundings'''
-        print 'ACTIVE SOURCES'
-        for a in self.active_sources:
-            print a.grid_position
-        print 'PENDING SOURCES'
-        for p in self.pending_active_sources:
-            print p.grid_position
-        self.active_sources.extend(self.pending_active_sources)
-        print 'ACTIVE SOURCES AFTER PENDING ADDED'
-        for a in self.active_sources:
-            print a.grid_position
 
-        for s in self.sources_to_be_depreciated:
-            print 'source DEPRECIATED: ' + str(s.grid_position)
-            self.active_sources.remove(s)
-            self.cached_sources.append(s)
-        self.sources_to_be_depreciated = []
+        self.active_sources.extend(self.pending_active_sources) # move our pending to our active
+        self.cached_sources.extend(self.sources_to_be_depreciated) # cache the depreciated sources
+        self.pending_active_sources = [] # clear the pending list
+        self.sources_to_be_depreciated = [] # clear the depreciated list
+
         
+
         '''
-        for p in self.pending_active_sources:
-            # transfer our pending sources over to be checked
-            self.active_sources.append(p)
-        '''
+        # transfer pending to active sources
+        self.active_sources.extend(self.pending_active_sources)
         self.pending_active_sources = [] # reset our list
 
-        sources_to_be_removed = []
-        print 'new list of active sources: SOURCE NUMBER: ' + str(len(self.active_sources))
+        # cache the sources to be depreciated list
+        for s in self.sources_to_be_depreciated:
+            #print 'source DEPRECIATED: ' + str(s.grid_position)
+            #self.active_sources.remove(s) # TAKING A LOT
+            self.cached_sources.append(self.sources_to_be_depreciated.pop())
+        self.sources_to_be_depreciated = []
+        '''
+        
+
+        #print 'new list of active sources: SOURCE NUMBER: ' + str(len(self.active_sources))
         for s in self.active_sources:
             next_generation = s.current_generation + 1
-            if next_generation > s.max_generations:
-                self.sources_to_be_depreciated.append(s)
-                # change this so its not in the middle
-            else:
+            if next_generation <= s.max_generations:
                 x = s.grid_position[0]
                 y = s.grid_position[1]
                 source_value = s.current_generation * s.strength
+                '''
                 print 'NEW SOURCE. Position:' + str(x) + ' ' + str(y)
                 print 'SETTING source value:'
                 print source_value
                 print 'new grid'
+                '''
                 self.grid[x][y] = source_value # set the value
+                '''
                 print self.grid
-                #time.sleep(1)
+                time.sleep(1)
                 print '----------'
                 print 'NEW SURROUNDINGS BEING TESTED'
                 print 'checking surroundings of previously placed tile at pos:'
                 print x, y
+                '''
                 
                 # get all 9 nearby tiles
                 (top_left, top_mid, top_right,
                  center_left, center_mid, center_right,
-                 bottom_left, bottom_mid, bottom_right) = self._get_surrounding_tiles(x, y)
+                 bottom_left, bottom_mid, bottom_right) = self._get_surrounding_tiles(x,y)
+                '''
                 print 'test center right3'
                 print center_right
+                '''
                 '''
                 # top left
                 if top_left > (source_value + s.strength) or top_left == 0:
@@ -1243,13 +1283,7 @@ class AIGrid(MapGrid):
                 '''
                 # top mid
                 if top_mid > (source_value + s.strength) or top_mid == 0:
-                    print 'target ADD: up mid: ' + str(top_mid)
-                    aiGridSource = self.get_cached_source()
-                    if aiGridSource:
-                        aiGridSource.update_values([x, y - 1], s.max_generations, next_generation, s.strength)
-                    else:
-                        aiGridSource = AIGridSource([x, y - 1], s.max_generations, next_generation, s.strength)
-                    self.pending_active_sources.append(aiGridSource)
+                    self.add_source_to_grid([x, y - 1], s.strength, s.max_generations, next_generation)
                 '''
                 # top right
                 if top_right > (source_value + s.strength) or top_right == 0:
@@ -1262,13 +1296,7 @@ class AIGrid(MapGrid):
                 '''
                 # center left
                 if center_left > (source_value + s.strength) or center_left == 0:
-                    print 'target ADD: center left: ' + str(center_left)
-                    aiGridSource = self.get_cached_source()
-                    if aiGridSource:
-                        aiGridSource.update_values([x - 1, y], s.max_generations, next_generation, s.strength)
-                    else:
-                        aiGridSource = AIGridSource([x - 1, y], s.max_generations, next_generation, s.strength)
-                    self.pending_active_sources.append(aiGridSource)
+                    self.add_source_to_grid([x - 1, y], s.strength, s.max_generations, next_generation)
                 '''   
                 # center mid      
                 if center_mid > (source_value + s.strength) or center_mid == 0:
@@ -1281,13 +1309,8 @@ class AIGrid(MapGrid):
                 '''    
                 # center right        
                 if center_right > (source_value + s.strength) or center_right == 0:
-                    print 'target ADD: center right: ' + str(center_right)
-                    aiGridSource = self.get_cached_source()
-                    if aiGridSource:
-                        aiGridSource.update_values([x + 1, y], s.max_generations, next_generation, s.strength)
-                    else:
-                        aiGridSource = AIGridSource([x + 1, y], s.max_generations, next_generation, s.strength)
-                    self.pending_active_sources.append(aiGridSource)
+                    self.add_source_to_grid([x + 1, y], s.strength, s.max_generations, next_generation)
+                    
                 ''' 
                 # bottom left        
                 if bottom_left > (source_value + s.strength) or bottom_left == 0:
@@ -1300,13 +1323,8 @@ class AIGrid(MapGrid):
                 '''  
                 # bottom mid      
                 if bottom_mid > (source_value + s.strength) or bottom_mid == 0:
-                    print 'target ADD: bottom mid: ' + str(bottom_mid)
-                    aiGridSource = self.get_cached_source()
-                    if aiGridSource:
-                        aiGridSource.update_values([x, y + 1], s.max_generations, next_generation, s.strength)
-                    else:
-                        aiGridSource = AIGridSource([x, y + 1], s.max_generations, next_generation, s.strength)
-                    self.pending_active_sources.append(aiGridSource)
+                    self.add_source_to_grid([x, y + 1], s.strength, s.max_generations, next_generation)
+
                 '''   
                 # bottom right      
                 if bottom_right > (source_value + s.strength) or bottom_right == 0:
@@ -1317,11 +1335,12 @@ class AIGrid(MapGrid):
                         aiGridSource = AIGridSource([x + 1, y + 1], s.max_generations, next_generation, s.strength)
                     self.active_sources.append(aiGridSource)
                 '''   
-                # cache our old source to save some memory
-
-                # ISSUE
-                self.sources_to_be_depreciated.append(s)
-                print 'source surroundings added to list'
+            # cache our old source to save some memory   
+            #print 'WE MUST DEPRECIATE!!!! next generation: ' + str(next_generation) + ' max generations: ' + str(s.max_generations)
+            self.sources_to_be_depreciated.append(s)
+            # change this so its not in the middle
+        #print self.grid
+        self.active_sources = []
 
         
 class MapGrid():
