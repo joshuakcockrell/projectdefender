@@ -323,7 +323,8 @@ class EnemyState(ServerStateObject):
 
     def update(self):
         # decide what the enemy will do
-        if self.state == 'alive':
+        # cannot be dead
+        if self.state in ['alive', 'attacking', 'moving']:
             center_position = [self.position[0] + (self.tile_size/2),
                                self.position[1] + (self.tile_size/2)]
             
@@ -331,9 +332,13 @@ class EnemyState(ServerStateObject):
             center_grid_position = mapgrid.convert_position_to_grid_position(center_position, self.tile_size)
             
             self.target_grid_position = self.aiGrid.get_target_grid_position(center_grid_position)
-            print grid_position
-            if self.target_grid_position == grid_position:
+            #print grid_position
+            #print self.target_grid_position
+            # check if the enemy should be attacking
+            # this occurs when the target tile has a value of 1
+            if self.aiGrid.is_target_final(self.target_grid_position):
                 self.state = 'attacking'
+                # WE NEED TO MOVE TO OUR PREVIOUS TARGET HERE
             else:
                 self.state = 'moving'
 
@@ -341,14 +346,12 @@ class EnemyState(ServerStateObject):
         if self.state == 'attacking':
             self.attack_timer -= 1
             if self.attack_timer <= 0:
+                print 'ATTACK!'
+                print self.aiGrid.grid
                 self.attack_timer += 60
                 self.state == 'alive'
                 self.state_changed = True
         
-        
-        elif self.state =='stopped':
-            pass
-            
         elif self.state == 'moving':
 
             center_position = [self.position[0] + (self.tile_size/2),
@@ -389,16 +392,20 @@ class WallState(ServerStateObject):
         self.object_type = 'wall'
 
         self.ai_grid_strength = 1
-        self.max_generations = 5
+        self.max_generations = 4
+        self.starting_generation = 1
 
-        self.velocity = [0.0,0.0]      
+        self.velocity = [0.0,0.0]
         self.state_changed = True
 
         self.aiGrid = aiGrid
         self._spawn()
 
     def _spawn(self):
-        self.aiGrid.add_source_to_grid(self.grid_position, self.ai_grid_strength, self.max_generations)
+        self.aiGrid.add_source_to_grid(self.grid_position,
+                                       self.ai_grid_strength,
+                                       self.max_generations,
+                                       self.starting_generation)
 
     def package_state(self):
         if self.id:
@@ -468,6 +475,7 @@ class ServerView():
         enemyState = EnemyState(self.aiGrid, event.spawn_position,
                                 self.tile_size)
         enemy_id = id(enemyState)
+        print 'NEW ENEMY! id: ' + str(enemy_id)
         enemyState.set_id(enemy_id)
         self.enemies[enemy_id] = enemyState
 
@@ -580,4 +588,6 @@ def main():
     reactor.run()
 
 if __name__ == '__main__':
-    main()
+    import cProfile
+    cProfile.run('main()')
+    #main()
