@@ -56,7 +56,7 @@ class EnemyGenerator():
         self.eventManager = eventManager
         self.spawn_position = [500, 500]
 
-        self.spawn_timer = 10 # seconds between spawns
+        self.spawn_timer = 15 # seconds between spawns
         self.current_spawn_timer = 0 # starts at 0
 
     def _reset_spawn_timer(self):
@@ -88,13 +88,12 @@ class ServerStateObject():
         else:
             return False
 
-    def set_id(self, new_id):
-        '''
-        sets the id for this object,
-        this must be done after the object's __init__ method
-        has been run
-        '''
-        self.id = new_id
+    def set_id(self):
+        '''sets the id for this object'''
+        self.id = id(self)
+
+    def get_id(self):
+        return self.id
         
     def update(self, delta_time):
         pass
@@ -123,6 +122,8 @@ class CharacterState(ServerStateObject):
         self.position_has_changed = True
         self.state_changed = True
 
+        self.set_id()
+
     def package_state(self):
         if self.id:
             object_state = {'object_type': self.object_type,
@@ -130,8 +131,9 @@ class CharacterState(ServerStateObject):
                             'object_position': self.position,
                             'object_velocity': self.velocity,
                             'object_state': self.state}
-
-            return object_state # send stuff
+            return object_state
+        else:
+            raise RuntimeError(str(self) + ' has no id')
 
     def _push_position_to_nearest_open_tile(self, left_position, right_position,
                                             top_position, bottom_position,
@@ -306,11 +308,13 @@ class EnemyState(ServerStateObject):
         self.object_type = 'enemy'
         self.tile_size = tile_size
 
-        self.speed = 2
+        self.speed = 1.5
         self.velocity = [0.0,0.0]
         self.attack_timer = 60
         self.previous_target_position = None
         self.state_changed = True
+
+        self.set_id()
 
     def package_state(self):
         if self.id:
@@ -319,12 +323,16 @@ class EnemyState(ServerStateObject):
                             'object_position': self.position,
                             'object_velocity': self.velocity,
                             'object_state': self.state}
-            return object_state 
+            return object_state
+        else:
+            raise RuntimeError(str(self) + ' has no id')
 
     def update(self):
         # decide what the enemy will do
         # cannot be dead
+        #print self.state
         if self.state in ['alive', 'attacking', 'moving']:
+            # get the center instead of the topleft
             center_position = [self.position[0] + (self.tile_size/2),
                                self.position[1] + (self.tile_size/2)]
             
@@ -344,15 +352,17 @@ class EnemyState(ServerStateObject):
 
         # handle what the enemy will do next
         if self.state == 'attacking':
+            #print 'attacking'
             self.attack_timer -= 1
             if self.attack_timer <= 0:
-                print 'ATTACK!'
-                print self.aiGrid.grid
+                #print 'ATTACK!'
+                #print self.aiGrid.grid
                 self.attack_timer += 60
                 self.state == 'alive'
                 self.state_changed = True
         
         elif self.state == 'moving':
+            
 
             center_position = [self.position[0] + (self.tile_size/2),
                                self.position[1] + (self.tile_size/2)]
@@ -364,8 +374,10 @@ class EnemyState(ServerStateObject):
                 # gets topleft position
                 self.target_position = mapgrid.convert_grid_position_to_position(self.target_grid_position, self.tile_size)
                 # if we have a new target
+                '''
                 if self.target_position != self.previous_target_position:
                     self.state_changed = True
+                '''
                 self.previous_target_position = self.target_position
                 vector_target_position = mapgrid.Vector(self.target_position[0], self.target_position[1])
                 vector_position = mapgrid.Vector(self.position[0], self.position[1])
@@ -378,7 +390,9 @@ class EnemyState(ServerStateObject):
                 # get displacement required
                 # HOW IT WILL WORK
                 # Get grid position
-                # check closest 
+                # check closest
+
+            #else: print 'we have no target grid!'
 
 class WallState(ServerStateObject):
     '''
@@ -392,20 +406,23 @@ class WallState(ServerStateObject):
         self.object_type = 'wall'
 
         self.ai_grid_strength = 1
-        self.max_generations = 4
+        self.max_generations = 9
         self.starting_generation = 1
 
         self.velocity = [0.0,0.0]
         self.state_changed = True
 
         self.aiGrid = aiGrid
+        self.set_id()
         self._spawn()
 
     def _spawn(self):
         self.aiGrid.add_source_to_grid(self.grid_position,
                                        self.ai_grid_strength,
                                        self.max_generations,
-                                       self.starting_generation)
+                                       self.starting_generation,
+                                       self,
+                                       primary_source=True)
 
     def package_state(self):
         if self.id:
@@ -415,6 +432,8 @@ class WallState(ServerStateObject):
                             'object_velocity': self.velocity,
                             'object_state': self.state}
             return object_state
+        else:
+            raise RuntimeError(str(self) + ' has no id')
 
 
 class ClientState(ServerStateObject):
@@ -432,6 +451,8 @@ class ClientState(ServerStateObject):
         self.client_ip = client_ip
 
         self.character_id = None
+
+        self.set_id()
 
     def set_character_id(self, character_id):
         self.character_id = character_id
@@ -474,10 +495,8 @@ class ServerView():
         '''
         enemyState = EnemyState(self.aiGrid, event.spawn_position,
                                 self.tile_size)
-        enemy_id = id(enemyState)
-        print 'NEW ENEMY! id: ' + str(enemy_id)
-        enemyState.set_id(enemy_id)
-        self.enemies[enemy_id] = enemyState
+        print 'NEW ENEMY! id: ' + str(enemyState.id)
+        self.enemies[enemyState.id] = enemyState
 
     def _process_place_wall_request_event(self, event):
         '''
@@ -487,27 +506,20 @@ class ServerView():
             # add a wall to the game
             self.collisionGrid.close_tile(event.grid_position)
             wall = WallState(self.aiGrid, event.grid_position)
-            wall_id = id(wall)
-            wall.set_id(wall_id)
-            self.walls[wall_id] = wall
+            self.walls[wall.id] = wall
 
     def _add_client_to_game(self, client_number, client_ip):
         clientState = ClientState(client_number, client_ip)
-        client_id = id(clientState)
-        clientState.set_id(client_id)
         self.clients[client_number] = clientState
-
-        self._add_character_to_game(client_id, client_number)
+        self._add_character_to_game(clientState.id, client_number)
         self._send_full_state()
 
     def _add_character_to_game(self, client_id, client_number):
         characterState = CharacterState(client_id, client_number, self.collisionGrid, self.tile_size)
-        character_id = id(characterState)
-        characterState.set_id(character_id)
         # add the character to our characters group
-        self.characters[character_id] = characterState
+        self.characters[characterState.id] = characterState
         # let the client know it's character id
-        self.clients[client_number].set_character_id(character_id)
+        self.clients[client_number].set_character_id(characterState.id)
         
     def _send_full_state(self):
         ''' sends full state regardless of if the state has changed '''
@@ -516,16 +528,23 @@ class ServerView():
             current_object = self.characters[object_id]
             object_state = current_object.package_state()
             object_states.append(object_state)
+            if not object_state:
+                raise RuntimeError('Character object state: ' + str(object_state))
             
         for object_id in self.enemies:
             current_object = self.enemies[object_id]
             object_state = current_object.package_state()
             object_states.append(object_state)
+            if not object_state:
+                raise RuntimeError('Enemy object state: ' + str(object_state))
             
         for object_id in self.walls:
             current_object = self.walls[object_id]
             object_state = current_object.package_state()
             object_states.append(object_state)
+            if not object_state:
+                raise RuntimeError('Wall object state: ' + str(object_state))
+
         event = events.CharacterStatesEvent(object_states)
         self.eventManager.post(event)
 
@@ -556,7 +575,7 @@ class ServerView():
 
     def notify(self, event):
         if event.name == 'Tick Event':
-            # should send changed
+            # !@$%!@%!# SHOULD SEND CHANGED !%@!^#^!
             self._send_full_state()
             self._update_objects()
 
