@@ -110,7 +110,7 @@ class ClientConnectionProtocol(amp.AMP):
         if self.game_state:
             return {'response': self.game_state}
         else:
-            raise RuntimeWarning
+            raise RuntimeWarning('No game state! ' + str(self.game_state))
     RemoteCompleteGameStateRequestEvent.responder(remote_complete_game_state_request_event)
 
     def remote_character_move_request_event(self, message):
