@@ -157,6 +157,7 @@ class EnemySprite(pygame.sprite.Sprite):
         self.images['dead'] = self.dead_image
         self.images['attacking'] = self.alive_image
         self.images['moving'] = self.alive_image
+        self.images['roaming'] = self.alive_image
         self.image = self.images[self.state]
         self.rect = self.image.get_rect()
 

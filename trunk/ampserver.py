@@ -294,12 +294,18 @@ class CharacterState(ServerStateObject):
         # push the character out to that wall
 
     def update(self):
+        # so the server knows if this object needs something
+        command_request = None
+        
         self.position[0] += self.velocity[0]
         self.position[1] += self.velocity[1]
+
+        return command_request
 
 class EnemyState(ServerStateObject):
     def __init__(self, aiGrid, position, tile_size):
         ServerStateObject.__init__(self)
+
 
         self.aiGrid = aiGrid
         self.position = position
@@ -308,14 +314,24 @@ class EnemyState(ServerStateObject):
         self.object_type = 'enemy'
         self.tile_size = tile_size
 
+        self.center_grid_position = self.get_center_grid_position()
         self.speed = 1.5
         self.velocity = [0.0,0.0]
         self.attack_timer = 60
+        self.target_position = None
         self.previous_target_position = None
         self.state_changed = True
 
         self.set_id()
 
+    def get_center_grid_position(self):
+        center_position = [self.position[0] + (self.tile_size/2),
+                           self.position[1] + (self.tile_size/2)]
+        
+        grid_position = mapgrid.convert_position_to_grid_position(self.position, self.tile_size)
+        center_grid_position = mapgrid.convert_position_to_grid_position(center_position, self.tile_size)
+        return center_grid_position
+    
     def package_state(self):
         if self.id:
             object_state = {'object_type': self.object_type,
@@ -327,72 +343,70 @@ class EnemyState(ServerStateObject):
         else:
             raise RuntimeError(str(self) + ' has no id')
 
-    def update(self):
-        # decide what the enemy will do
-        # cannot be dead
-        #print self.state
-        if self.state in ['alive', 'attacking', 'moving']:
-            # get the center instead of the topleft
-            center_position = [self.position[0] + (self.tile_size/2),
-                               self.position[1] + (self.tile_size/2)]
-            
-            grid_position = mapgrid.convert_position_to_grid_position(self.position, self.tile_size)
-            center_grid_position = mapgrid.convert_position_to_grid_position(center_position, self.tile_size)
-            
-            self.target_grid_position = self.aiGrid.get_target_grid_position(center_grid_position)
-            #print grid_position
-            #print self.target_grid_position
-            # check if the enemy should be attacking
-            # this occurs when the target tile has a value of 1
-            if self.aiGrid.is_target_final(self.target_grid_position):
-                self.state = 'attacking'
-                # WE NEED TO MOVE TO OUR PREVIOUS TARGET HERE
-            else:
-                self.state = 'moving'
+    def _move(self, destination_position):
+        if destination_position:
+            # set a vector for the target
+            vector_target_position = mapgrid.Vector(destination_position[0], destination_position[1])
+            # set a vector for our position
+            vector_position = mapgrid.Vector(self.position[0], self.position[1])
+            # subtract the vectors to find total displacement
+            displacement_to_target = vector_target_position - vector_position
+            # normalize to find direction to move
+            velocity = displacement_to_target.normalize()
+            # set that as our velocity
+            self.velocity = [velocity[0], velocity[1]]
+            # move the position
+            self.position[0] += (self.velocity[0] * self.speed)
+            self.position[1] += (self.velocity[1] * self.speed)
 
-        # handle what the enemy will do next
+    def get_target_position(self):
+        # get the center instead of the topleft
+        center_grid_position = self.get_center_grid_position()
+        if center_grid_position:
+            target_grid_position = self.aiGrid.get_target_grid_position(center_grid_position)
+            return target_grid_position
+        else:
+            raise RuntimeError('No center_grid_position ' + str(center_grid_position))
+
+    def update(self):
+        # so the server knows if this object needs something
+        command_request = None
+        
+        if self.state in ['alive', 'attacking', 'moving', 'roaming']:
+            # check if we can attack
+            if self.target_position:
+                self.previous_target_position = self.target_position
+            
+            self.target_grid_position = self.get_target_position()
+            if self.target_grid_position:
+                target_value = self.aiGrid.get_position_value(self.target_grid_position)
+                if target_value == 1:
+                    self.state = 'attacking'
+                else:
+                    self.state = 'moving'
+            else:
+                if self.state != 'roaming':
+                    self.state = 'roaming'
+                    self.state_changed = True
+                
+
         if self.state == 'attacking':
-            #print 'attacking'
             self.attack_timer -= 1
             if self.attack_timer <= 0:
-                #print 'ATTACK!'
-                #print self.aiGrid.grid
                 self.attack_timer += 60
                 self.state == 'alive'
                 self.state_changed = True
+                command_request = 'attack request'
+
+            self._move(self.previous_target_position)
         
         elif self.state == 'moving':
-            
-
-            center_position = [self.position[0] + (self.tile_size/2),
-                               self.position[1] + (self.tile_size/2)]
-            
-            grid_position = mapgrid.convert_position_to_grid_position(self.position, self.tile_size)
-            center_grid_position = mapgrid.convert_position_to_grid_position(center_position, self.tile_size)
-
             if self.target_grid_position:
-                # gets topleft position
+                # get position of target
                 self.target_position = mapgrid.convert_grid_position_to_position(self.target_grid_position, self.tile_size)
-                # if we have a new target
-                '''
-                if self.target_position != self.previous_target_position:
-                    self.state_changed = True
-                '''
-                self.previous_target_position = self.target_position
-                vector_target_position = mapgrid.Vector(self.target_position[0], self.target_position[1])
-                vector_position = mapgrid.Vector(self.position[0], self.position[1])
-                displacement_to_target = vector_target_position - vector_position
-                velocity = displacement_to_target.normalize()
-                self.velocity = [velocity[0], velocity[1]]
-
-                self.position[0] += (self.velocity[0] * self.speed)
-                self.position[1] += (self.velocity[1] * self.speed)
-                # get displacement required
-                # HOW IT WILL WORK
-                # Get grid position
-                # check closest
-
-            #else: print 'we have no target grid!'
+                self._move(self.target_position)
+                
+        return command_request
 
 class WallState(ServerStateObject):
     '''
@@ -412,6 +426,8 @@ class WallState(ServerStateObject):
         self.velocity = [0.0,0.0]
         self.state_changed = True
 
+        self.ai_children_positions = []
+
         self.aiGrid = aiGrid
         self.set_id()
         self._spawn()
@@ -421,8 +437,18 @@ class WallState(ServerStateObject):
                                        self.ai_grid_strength,
                                        self.max_generations,
                                        self.starting_generation,
-                                       self,
-                                       primary_source=True)
+                                       self)
+
+    def get_grid_position(self):
+        return self.grid_position
+
+    def add_ai_child_position(self, child_position):
+        self.ai_children_positions.append(child_position)
+
+    def _remove_ai_children_positions(self):
+        for p in self.ai_children_positions:
+            self.aiGrid.remove_child(self, p)
+        self.ai_children_positions = []
 
     def package_state(self):
         if self.id:
@@ -434,6 +460,10 @@ class WallState(ServerStateObject):
             return object_state
         else:
             raise RuntimeError(str(self) + ' has no id')
+
+    def get_attacked(self):
+        self._remove_ai_children_positions()
+        print 'ahh im dead!!!'
 
 
 class ClientState(ServerStateObject):
@@ -497,6 +527,56 @@ class ServerView():
                                 self.tile_size)
         print 'NEW ENEMY! id: ' + str(enemyState.id)
         self.enemies[enemyState.id] = enemyState
+
+    def _process_enemy_attack_request(self, enemy):
+        enemy_center = enemy.get_center_grid_position()
+        walls_to_remove = []
+        for wall_id in self.walls:
+            wall = self.walls[wall_id]
+            wall_center = self.walls[wall_id].get_grid_position()
+            x = wall_center[0]
+            y = wall_center[1]
+            #print 'enemy ' + str(enemy_center)
+            #print 'wall ' + str([x,y])
+            if enemy_center == [x - 1, y - 1]:
+                wall.get_attacked()
+                walls_to_remove.append(wall_id)
+                print 'DESTROY'
+            elif enemy_center == [x, y - 1]:
+                wall.get_attacked()
+                walls_to_remove.append(wall_id)
+                print 'DESTROY'
+            elif enemy_center == [x + 1, y - 1]:
+                wall.get_attacked()
+                walls_to_remove.append(wall_id)
+                print 'DESTROY'
+            elif enemy_center == [x - 1, y]:
+                wall.get_attacked()
+                walls_to_remove.append(wall_id)
+                print 'DESTROY'
+            elif enemy_center == [x, y]:
+                wall.get_attacked()
+                walls_to_remove.append(wall_id)
+                print 'DESTROY'
+            elif enemy_center == [x + 1, y]:
+                wall.get_attacked()
+                walls_to_remove.append(wall_id)
+                print 'DESTROY'
+            elif enemy_center == [x - 1, y]:
+                wall.get_attacked()
+                walls_to_remove.append(wall_id)
+                print 'DESTROY'
+            elif enemy_center == [x, y]:
+                wall.get_attacked()
+                walls_to_remove.append(wall_id)
+                print 'DESTROY'
+            elif enemy_center == [x + 1, y]:
+                wall.get_attacked()
+                walls_to_remove.append(wall_id)
+                print 'DESTROY'
+
+        for w in walls_to_remove:
+            del self.walls[w]
 
     def _process_place_wall_request_event(self, event):
         '''
@@ -567,9 +647,15 @@ class ServerView():
 
     def _update_objects(self):
         for object_id in self.characters:
-            self.characters[object_id].update()
+            # update the character, will return an optional request
+            command_requet = self.characters[object_id].update()
         for object_id in self.enemies:
-            self.enemies[object_id].update()
+            # update the enemy, will return an optional request
+            command_request = self.enemies[object_id].update()
+            if command_request == 'attack request':
+                enemy = self.enemies[object_id]
+                self._process_enemy_attack_request(enemy)
+                
         self.aiGrid.update()
         self.enemyGenerator.update(delta_time = 0.025)
 
@@ -608,5 +694,7 @@ def main():
 
 if __name__ == '__main__':
     import cProfile
-    cProfile.run('main()')
-    #main()
+    #cProfile.run('main()')
+    main()
+
+    
