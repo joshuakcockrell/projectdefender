@@ -3,6 +3,7 @@ from twisted.internet import reactor
 
 # python imports
 import time
+import random
 
 # defender imports
 import serverfactory
@@ -54,16 +55,21 @@ class ProgramClock():
 class EnemyGenerator():
     def __init__(self, eventManager):
         self.eventManager = eventManager
-        self.spawn_position = [500, 500]
-
-        self.spawn_timer = 15 # seconds between spawns
+        
+        self.spawn_position = (500, 500)
+        self.spawn_timer = 2 # seconds between spawns
         self.current_spawn_timer = 0 # starts at 0
+        self.max_enemies = 1
+        self.created_enemies = 0
+
+    def _get_spawn_position(self):
+        return self.spawn_position
 
     def _reset_spawn_timer(self):
         self.current_spawn_timer = 0
 
     def _create_enemy(self):
-        event = events.AddEnemyToGameRequestEvent(self.spawn_position)
+        event = events.AddEnemyToGameRequestEvent(self._get_spawn_position())
         self.eventManager.post(event)
 
     def update(self, delta_time):
@@ -71,8 +77,10 @@ class EnemyGenerator():
         self.current_spawn_timer += delta_time
         if self.current_spawn_timer >= self.spawn_timer:
             # create an enemy
-            self.current_spawn_timer -= self.spawn_timer 
-            self._create_enemy()
+            self.current_spawn_timer -= self.spawn_timer
+            if self.created_enemies < self.max_enemies:
+                self.created_enemies += 1
+                self._create_enemy()
 
 class ServerStateObject():
     def __init__(self):
@@ -116,7 +124,7 @@ class CharacterState(ServerStateObject):
         
         self.life = 100
         self.movement_speed = 3
-        self.position = [300, 300]
+        self.position = [0, 0]
         self.velocity = [0.0,0.0]
         
         self.position_has_changed = True
@@ -257,28 +265,28 @@ class CharacterState(ServerStateObject):
 
         if self.collisionGrid.is_tile_open(top_left_grid_position) == False:
             self.position = self._push_position_to_nearest_open_tile(left_position,
-                                                                         right_position,
-                                                                         top_position,
-                                                                         bottom_position,
-                                                                         top_left_grid_position)
+                                                                     right_position,
+                                                                     top_position,
+                                                                     bottom_position,
+                                                                     top_left_grid_position)
         if self.collisionGrid.is_tile_open(top_right_grid_position) == False:
             self.position = self._push_position_to_nearest_open_tile(left_position,
-                                                                         right_position,
-                                                                         top_position,
-                                                                         bottom_position,
-                                                                         top_right_grid_position)
+                                                                     right_position,
+                                                                     top_position,
+                                                                     bottom_position,
+                                                                     top_right_grid_position)
         if self.collisionGrid.is_tile_open(bottom_left_grid_position) == False:
             self.position = self._push_position_to_nearest_open_tile(left_position,
-                                                                         right_position,
-                                                                         top_position,
-                                                                         bottom_position,
-                                                                         bottom_left_grid_position)
+                                                                     right_position,
+                                                                     top_position,
+                                                                     bottom_position,
+                                                                     bottom_left_grid_position)
         if self.collisionGrid.is_tile_open(bottom_right_grid_position) == False:
             self.position = self._push_position_to_nearest_open_tile(left_position,
-                                                                         right_position,
-                                                                         top_position,
-                                                                         bottom_position,
-                                                                         bottom_right_grid_position)
+                                                                     right_position,
+                                                                     top_position,
+                                                                     bottom_position,
+                                                                     bottom_right_grid_position)
 
 
 
@@ -303,26 +311,32 @@ class CharacterState(ServerStateObject):
         return command_request
 
 class EnemyState(ServerStateObject):
-    def __init__(self, aiGrid, position, tile_size):
+    def __init__(self, collisionGrid, aiGrid, position, tile_size):
         ServerStateObject.__init__(self)
 
-
+        self.collisionGrid = collisionGrid
         self.aiGrid = aiGrid
-        self.position = position
+        self.position = [position[0], position[1]]
         self.tile_size = tile_size
         self.state = 'alive'
         self.object_type = 'enemy'
         self.tile_size = tile_size
 
         self.center_grid_position = self.get_center_grid_position()
-        self.speed = 1.5
+        self.speed = 0.3
         self.velocity = [0.0,0.0]
-        self.attack_timer = 60
+        self.attack_timer = 300
+        self.base_attack_damage = 1
+        self.random_roaming_chance = 0.0001
+        
         self.target_position = None
+        self.roaming_target_position = None
         self.previous_target_position = None
         self.state_changed = True
 
         self.set_id()
+        
+        print 'New enemy... id: ' + str(self.id)
 
     def get_center_grid_position(self):
         center_position = [self.position[0] + (self.tile_size/2),
@@ -356,9 +370,23 @@ class EnemyState(ServerStateObject):
             # set that as our velocity
             self.velocity = [velocity[0], velocity[1]]
             # move the position
-            self.position[0] += (self.velocity[0] * self.speed)
-            self.position[1] += (self.velocity[1] * self.speed)
+            if displacement_to_target[0] ** 2 < self.speed ** 2:
+                self.position[0] += displacement_to_target[0]
+            else:
+                self.position[0] += (self.velocity[0] * self.speed)
 
+            if displacement_to_target[1] ** 2 < self.speed ** 2:
+                self.position[1] += displacement_to_target[1]
+            else:
+                self.position[1] += (self.velocity[1] * self.speed)
+
+    def _random_roaming_chance(self):
+        '''Returns true if we are going to randomly roam'''
+        seed = random.random()
+        if seed < self.random_roaming_chance:
+            return True
+        
+        
     def get_target_position(self):
         # get the center instead of the topleft
         center_grid_position = self.get_center_grid_position()
@@ -368,26 +396,97 @@ class EnemyState(ServerStateObject):
         else:
             raise RuntimeError('No center_grid_position ' + str(center_grid_position))
 
-    def update(self):
-        # so the server knows if this object needs something
-        command_request = None
+    def _determine_state(self):
+        '''decides which state we are at'''
         
-        if self.state in ['alive', 'attacking', 'moving', 'roaming']:
-            # check if we can attack
-            if self.target_position:
-                self.previous_target_position = self.target_position
+        if self.state in ['roaming']:
+            # if were not at our roaming destination
+            if self.roaming_target_position != self.position:
+                # we still need to keep roaming to get to our destination
+                return 'roaming' # we are roaming
+            else:  
+                # we're done roaming
+                self.roaming_target_position = None
+                # now moving
+                self.state_changed = True
+                self.state = 'alive'
             
-            self.target_grid_position = self.get_target_position()
-            if self.target_grid_position:
-                target_value = self.aiGrid.get_position_value(self.target_grid_position)
-                if target_value == 1:
-                    self.state = 'attacking'
-                else:
-                    self.state = 'moving'
+
+        # if were not roaming
+        # check if we can attack
+        if self.target_position:
+            # store our previous target
+            self.previous_target_position = self.target_position
+
+        # get new target
+        self.target_grid_position = self.get_target_position()
+
+        if self._random_roaming_chance():
+            self.state = 'roaming'
+
+        # if we have a position to move to
+        if self.target_grid_position and self.state != 'roaming':
+            target_value = self.aiGrid.get_position_value(self.target_grid_position)
+            # if the target is attackable
+            if target_value == 1:
+                # we are attacking
+                return 'attacking'
             else:
-                if self.state != 'roaming':
-                    self.state = 'roaming'
-                    self.state_changed = True
+                return 'moving'
+            
+        # if we have nowhere to move to or noone to attack
+        else:
+            self.state_changed = True
+
+            # pick a random direction, if its open, move to it.
+            center_grid_position = self.get_center_grid_position()
+            x = center_grid_position[0]
+            y = center_grid_position[1]
+            direction = self.aiGrid.get_random_direction()
+            
+            if direction == 'right':
+                if self.collisionGrid.is_tile_open([x + 1, y]):
+                    self.roaming_target_position = mapgrid.convert_grid_position_to_position([x + 1, y], self.tile_size)
+                    return 'roaming'
+                else:
+                    return 'alive'
+                    
+            elif direction == 'up':
+                if self.collisionGrid.is_tile_open([x, y - 1]):
+                    self.roaming_target_position = mapgrid.convert_grid_position_to_position([x, y - 1], self.tile_size)
+                    return 'roaming'
+                else:
+                    return 'alive'
+                    
+            elif direction == 'left':
+                if self.collisionGrid.is_tile_open([x - 1, y]):
+                    self.roaming_target_position = mapgrid.convert_grid_position_to_position([x - 1, y], self.tile_size)
+                    return 'roaming'
+                else:
+                    return 'alive'
+                   
+            elif direction == 'down':
+                if self.collisionGrid.is_tile_open([x, y + 1]):
+                    self.roaming_target_position = mapgrid.convert_grid_position_to_position([x, y + 1], self.tile_size)
+                    return 'roaming'
+                else:
+                    return 'alive'
+
+
+    def _get_attack_damage(self):
+        '''logic to determine how much damage an attack will do goes here'''
+        return self.base_attack_damage
+        
+    def update(self):
+
+        # so the server knows if this object needs something
+        command_request = {'request': None}
+
+        # how it will work
+        self.state = self._determine_state()
+        # get which state we are currently at
+        # react to the state
+
                 
 
         if self.state == 'attacking':
@@ -396,7 +495,8 @@ class EnemyState(ServerStateObject):
                 self.attack_timer += 60
                 self.state == 'alive'
                 self.state_changed = True
-                command_request = 'attack request'
+                command_request['request'] = 'attack request'
+                command_request['damage'] = self._get_attack_damage()
 
             self._move(self.previous_target_position)
         
@@ -405,6 +505,12 @@ class EnemyState(ServerStateObject):
                 # get position of target
                 self.target_position = mapgrid.convert_grid_position_to_position(self.target_grid_position, self.tile_size)
                 self._move(self.target_position)
+
+        elif self.state == 'roaming':
+            if self.roaming_target_position:
+                self._move(self.roaming_target_position)
+            else:
+                raise RuntimeError('No roaming target position: ' + str(self.roaming_target_position))
                 
         return command_request
 
@@ -412,15 +518,17 @@ class WallState(ServerStateObject):
     '''
     represents a wall object in the game state
     '''
-    def __init__(self, aiGrid, grid_position):
+    def __init__(self, collisionGrid, aiGrid, grid_position):
         ServerStateObject.__init__(self)
 
         self.grid_position = grid_position
         self.state = 'alive'
         self.object_type = 'wall'
 
+        self.health = 10
+
         self.ai_grid_strength = 1
-        self.max_generations = 9
+        self.max_generations = 20
         self.starting_generation = 1
 
         self.velocity = [0.0,0.0]
@@ -428,11 +536,15 @@ class WallState(ServerStateObject):
 
         self.ai_children_positions = []
 
+        self.collisionGrid = collisionGrid
         self.aiGrid = aiGrid
         self.set_id()
         self._spawn()
 
     def _spawn(self):
+        ''' updates the collision grid and the ai grid'''
+        
+        self.collisionGrid.close_tile(self.grid_position)
         self.aiGrid.add_source_to_grid(self.grid_position,
                                        self.ai_grid_strength,
                                        self.max_generations,
@@ -457,13 +569,40 @@ class WallState(ServerStateObject):
                             'object_position': self.grid_position,
                             'object_velocity': self.velocity,
                             'object_state': self.state}
+            # if we are dead
+            if self.state == 'dead':
+                # we can now request removal from the game because we told the clients we are dead
+                self.state = 'pending removal'
+                
             return object_state
         else:
             raise RuntimeError(str(self) + ' has no id')
 
-    def get_attacked(self):
+    def destroy_wall(self):
+        '''destroy this objects influence on the game world'''
+
+        # remove the influence on the ai grid
         self._remove_ai_children_positions()
-        print 'ahh im dead!!!'
+        # remove the influence on the collision grid
+        self.collisionGrid.open_tile(self.grid_position)
+        # change our state
+        self.state = 'dead'
+        self.state_changed = True
+        print 'Wall destroyed'
+
+    def get_attacked(self, attack_damage):
+        self.health -= attack_damage
+        if self.health <= 0:
+            self.destroy_wall()
+
+    def update(self):
+        command_request = {'request': None}
+        # if we're waiting to be removed from the game
+        if self.state == 'pending removal':
+            # request to be removed
+            command_request['request'] = 'removal request'
+
+        return command_request
 
 
 class ClientState(ServerStateObject):
@@ -523,60 +662,35 @@ class ServerView():
         '''
         when the enemy generator wants to spawn an enemy
         '''
-        enemyState = EnemyState(self.aiGrid, event.spawn_position,
-                                self.tile_size)
-        print 'NEW ENEMY! id: ' + str(enemyState.id)
+        enemyState = EnemyState(self.collisionGrid, self.aiGrid,
+                                event.spawn_position, self.tile_size)
         self.enemies[enemyState.id] = enemyState
 
-    def _process_enemy_attack_request(self, enemy):
+    def _process_enemy_attack_request(self, enemy, attack_damage):
         enemy_center = enemy.get_center_grid_position()
-        walls_to_remove = []
         for wall_id in self.walls:
             wall = self.walls[wall_id]
             wall_center = self.walls[wall_id].get_grid_position()
             x = wall_center[0]
             y = wall_center[1]
-            #print 'enemy ' + str(enemy_center)
-            #print 'wall ' + str([x,y])
             if enemy_center == [x - 1, y - 1]:
-                wall.get_attacked()
-                walls_to_remove.append(wall_id)
-                print 'DESTROY'
+                wall.get_attacked(attack_damage)
             elif enemy_center == [x, y - 1]:
-                wall.get_attacked()
-                walls_to_remove.append(wall_id)
-                print 'DESTROY'
+                wall.get_attacked(attack_damage)
             elif enemy_center == [x + 1, y - 1]:
-                wall.get_attacked()
-                walls_to_remove.append(wall_id)
-                print 'DESTROY'
+                wall.get_attacked(attack_damage)
             elif enemy_center == [x - 1, y]:
-                wall.get_attacked()
-                walls_to_remove.append(wall_id)
-                print 'DESTROY'
+                wall.get_attacked(attack_damage)
             elif enemy_center == [x, y]:
-                wall.get_attacked()
-                walls_to_remove.append(wall_id)
-                print 'DESTROY'
+                wall.get_attacked(attack_damage)
             elif enemy_center == [x + 1, y]:
-                wall.get_attacked()
-                walls_to_remove.append(wall_id)
-                print 'DESTROY'
-            elif enemy_center == [x - 1, y]:
-                wall.get_attacked()
-                walls_to_remove.append(wall_id)
-                print 'DESTROY'
-            elif enemy_center == [x, y]:
-                wall.get_attacked()
-                walls_to_remove.append(wall_id)
-                print 'DESTROY'
-            elif enemy_center == [x + 1, y]:
-                wall.get_attacked()
-                walls_to_remove.append(wall_id)
-                print 'DESTROY'
-
-        for w in walls_to_remove:
-            del self.walls[w]
+                wall.get_attacked(attack_damage)
+            elif enemy_center == [x - 1, y + 1]:
+                wall.get_attacked(attack_damage)
+            elif enemy_center == [x, y + 1]:
+                wall.get_attacked(attack_damage)
+            elif enemy_center == [x + 1, y + 1]:
+                wall.get_attacked(attack_damage)
 
     def _process_place_wall_request_event(self, event):
         '''
@@ -584,9 +698,8 @@ class ServerView():
         '''
         if self.collisionGrid.is_tile_open(event.grid_position):
             # add a wall to the game
-            self.collisionGrid.close_tile(event.grid_position)
-            wall = WallState(self.aiGrid, event.grid_position)
-            self.walls[wall.id] = wall
+            wall = WallState(self.collisionGrid, self.aiGrid, event.grid_position)
+            self.walls[wall.get_id()] = wall
 
     def _add_client_to_game(self, client_number, client_ip):
         clientState = ClientState(client_number, client_ip)
@@ -606,25 +719,34 @@ class ServerView():
         object_states = []
         for object_id in self.characters:
             current_object = self.characters[object_id]
+            if current_object.state == 'pending removal':
+                raise RuntimeError('Object state: ' + str(object_state))
+            
             object_state = current_object.package_state()
             object_states.append(object_state)
             if not object_state:
-                raise RuntimeError('Character object state: ' + str(object_state))
+                raise RuntimeError('Object state: ' + str(object_state))
             
         for object_id in self.enemies:
             current_object = self.enemies[object_id]
+            if current_object.state == 'pending removal':
+                raise RuntimeError('Object state: ' + str(object_state))
+            
             object_state = current_object.package_state()
             object_states.append(object_state)
             if not object_state:
-                raise RuntimeError('Enemy object state: ' + str(object_state))
+                raise RuntimeError('Object state: ' + str(object_state))
             
         for object_id in self.walls:
             current_object = self.walls[object_id]
+            if current_object.state == 'pending removal':
+                raise RuntimeError('Object state: ' + str(object_state))
+            
             object_state = current_object.package_state()
             object_states.append(object_state)
             if not object_state:
-                raise RuntimeError('Wall object state: ' + str(object_state))
-
+                raise RuntimeError('Object state: ' + str(object_state))
+                
         event = events.CharacterStatesEvent(object_states)
         self.eventManager.post(event)
 
@@ -649,12 +771,23 @@ class ServerView():
         for object_id in self.characters:
             # update the character, will return an optional request
             command_requet = self.characters[object_id].update()
+            
         for object_id in self.enemies:
             # update the enemy, will return an optional request
             command_request = self.enemies[object_id].update()
-            if command_request == 'attack request':
+            if command_request['request'] == 'attack request':
                 enemy = self.enemies[object_id]
-                self._process_enemy_attack_request(enemy)
+                attack_damage = command_request['damage']
+                self._process_enemy_attack_request(enemy, attack_damage)
+
+        wall_ids_to_remove = []
+        for object_id in self.walls:
+            command_request = self.walls[object_id].update()
+            if command_request['request'] == 'removal request':
+                wall_ids_to_remove.append(object_id)
+
+        for i in wall_ids_to_remove:
+            del self.walls[i]
                 
         self.aiGrid.update()
         self.enemyGenerator.update(delta_time = 0.025)
@@ -662,8 +795,8 @@ class ServerView():
     def notify(self, event):
         if event.name == 'Tick Event':
             # !@$%!@%!# SHOULD SEND CHANGED !%@!^#^!
-            self._send_full_state()
             self._update_objects()
+            self._send_full_state()
 
         elif event.name == 'New Client Connected Event':
             self._add_client_to_game(event.client_number, event.client_ip)
