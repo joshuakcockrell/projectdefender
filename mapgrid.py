@@ -79,7 +79,7 @@ class Vector():
         l = self.length()
         if l != 0:
             return (self.x / l, self.y / l)
-        return None
+        return (0, 0)
 
 class MapGrid():
 
@@ -143,7 +143,7 @@ class MapGrid():
 
         return value
 
-    def _get_random_direction(self):
+    def get_random_direction(self):
         '''
         generates a random direction,
         used in the random walk algorithm
@@ -205,7 +205,7 @@ class TerrainGrid(MapGrid):
             current_room_number += 1
 
             # move to a new spot to create a room
-            direction = self._get_random_direction()
+            direction = self.get_random_direction()
             if direction == 'right':
                 # check for out of bounds
                 if current_position_x < map_width:
@@ -270,7 +270,7 @@ class TerrainGrid(MapGrid):
             ##### Make the rest of the rooms #####
 
             # get random hall direction
-            hall_direction = self._get_random_direction()
+            hall_direction = self.get_random_direction()
             # get next hall starting position
             hall_start_position = self._get_hall_start_position(terrain_map_grid, hall_direction)
             print 'hall start position'
