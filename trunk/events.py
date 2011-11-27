@@ -46,23 +46,26 @@ class CompleteGameStateEvent(Event):
         self.game_state = game_state
         self.send_over_network = True
 
-class CharacterStatesEvent(Event):
-    '''
-    Holds the info for every
-    character in the game
-    server to client and
-    internal client only
-    '''
-    # example of game state list
-    # [['OBJECT NAME', id, [position]], object2, object3...
-    # [['CHARACTER', 19376408, [300, 300]], ect... ]
-    def __init__(self, character_states):
-        self.name = 'Character States Event'
-        self.character_states = character_states
+class CompleteGameStateEvent(Event):
+    '''Holds the info for every object'''
+    def __init__(self, complete_game_state):
+        self.name = 'Complete Game State Event'
+        self.complete_game_state = complete_game_state
+
+class ChangedGameStateEvent(Event):
+    '''Contains the state for all the objects which have changed'''
+    def __init__(self, changed_game_state):
+        self.name = 'Changed Game State Event'
+        self.changed_game_state = changed_game_state
 
 class CompleteGameStateRequestEvent(Event):
     def __init__(self):
         self.name = 'Complete Game State Request Event'
+        self.send_over_network = True
+
+class ChangedGameStateRequestEvent(Event):
+    def __init__(self):
+        self.name = 'Changed Game State Request Event'
         self.send_over_network = True
 
 ##### USER INPUT EVENTS #####
@@ -94,6 +97,14 @@ class PlaceWallRequestEvent(Event):
         self.name = 'Place Wall Request Event'
         self.grid_position = grid_position
         self.client_number = client_number # server uses this to track which client's input it was
+        self.send_over_network = True
+
+class ShootProjectileRequestEvent(Event):
+    '''this is created when the user clicks and wants to shoot a projectile'''
+    def __init__(self, destination_position, client_number=None):
+        self.name = 'Shoot Projectile Request Event'
+        self.destination_position = destination_position
+        self.client_number = client_number
         self.send_over_network = True
 
 class AddEnemyToGameRequestEvent(Event):
@@ -130,23 +141,31 @@ class EventEncoder():
                           'grid_position': event.grid_position}
             encoded_event.append(dict_event)
             return encoded_event
-                          
+
+        elif event.name == 'Shoot Projectile Request Event':
+            encoded_event = []
+            dict_event = {'name': 'Shoot Projectile Request Event',
+                          'destination position': event.destination_position}
+            encoded_event.append(dict_event)
+            return encoded_event
 
         else:
-            print 'The event <' + event.name + '> cannot be encoded by the EventEncoder!'
+            raise RuntimeError('The event <' + event.name + '> cannot be encoded by the EventEncoder!')
         
     def decode_event(self, encoded_event, client_number = None):
         '''
         event: [{'input': 'LEFT', 'name': 'User Keyboard Input Event'}]
         returns: Event instance
         '''
-        #### DOES RETURNING INSIDE A FOR LOOP BREAK THINGS??? ####
         for e in encoded_event:
             if e['name'] == 'User Keyboard Input Event':
                 event = UserKeyboardInputEvent(e['input'], client_number)
                 return event
             elif e['name'] == 'Place Wall Request Event':
                 event = PlaceWallRequestEvent(e['grid_position'], client_number)
+                return event
+            elif e['name'] == 'Shoot Projectile Request Event':
+                event = ShootProjectileRequestEvent(e['destination position'], client_number)
                 return event
 
 

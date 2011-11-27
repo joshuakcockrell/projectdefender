@@ -88,6 +88,17 @@ class ClientSpriteObject(rabbyt.Sprite):
     def set_position(self, position):
         self.position = [position[0], position[1]]
 
+    def set_center_position(self, position):
+        '''takes a topleft position and makes it so the center is at that point'''
+        texture_width = self.get_width()
+        texture_height = self.get_height()
+
+        # transform our center position so its at the same spot as our topleft
+        new_topleft_position = (position[0] - (texture_width / 2),
+                                position[1] - (texture_height / 2))
+
+        self.position = [new_topleft_position[0], new_topleft_position[1]]
+
     def set_velocity(self, velocity):
         self.velocity = [velocity[0], velocity[1]]
 
@@ -136,21 +147,26 @@ class ClientSpriteObject(rabbyt.Sprite):
         pass
 
 class Particle(ClientSpriteObject):
-    def __init__(self, screen_dimensions, object_state, object_position):
+    def __init__(self, screen_dimensions, particle_type, object_state, object_position):
         ClientSpriteObject.__init__(self, screen_dimensions, object_state)
 
+        self.particle_type = particle_type
         self._load_textures()
         self.set_texture()
 
         self.speed = .001
         object_velocity = self._get_random_velocity()
-        
-        self.set_position(object_position)
+
+        self.set_center_position(object_position)
         self.set_velocity(object_velocity)
         self.set_alpha(.5)
 
     def _load_textures(self):
-        self.textures['alive'] = os.path.join('resources', 'blackbullet.png')
+        if self.particle_type == 'basic':
+            self.textures['alive'] = os.path.join('resources', 'blackbullet.png')
+        elif self.particle_type == 'glitter':
+            self.textures['alive'] = os.path.join('resources', 'blackbullet.png')
+            self.textures['yellow'] = os.path.join('resources', 'yellowbullet.png')
 
     def _get_random_velocity(self):
         velocity_x = random.random() * random.choice([-1, 1])
@@ -168,7 +184,12 @@ class Particle(ClientSpriteObject):
 
             self.alpha -= .01
             if self.alpha <= 0:
-                self.state = 'pending removal'        
+                self.state = 'pending removal'
+
+            if random.choice([True, False]):
+                self.texture = self.textures['alive']
+            else:
+                self.texture = self.textures['yellow']
 
         
 class WallSprite(ClientSpriteObject):
@@ -207,7 +228,46 @@ class WallSprite(ClientSpriteObject):
         # set the position
         self.position[0] += self.velocity[0]
         self.position[1] += self.velocity[1]
+
+class ProjectileSprite(ClientSpriteObject):
+    def __init__(self, screen_dimensions, object_id, object_state,
+                 object_position, object_velocity):
+        ClientSpriteObject.__init__(self, screen_dimensions, object_state, object_id)
+
+        self._load_textures()
+        self.set_texture()
+
+        self.set_position(object_position)
+        self.set_velocity(object_velocity)
+
+        print 'New Projectile... id: ' + str(self.id)
+
+    def _load_textures(self):
+        self.textures['alive'] = os.path.join('resources','blackbullet.png')
+
+    def spawn_particles(self):
+        center_position = (self.position[0] + (self.get_width() / 2),
+                           self.position[1] + (self.get_height() / 2))
+        particle = Particle(self.screen_dimensions, 'glitter', 'alive', center_position)
+        self.particles.append(particle)
+
+    def update(self, delta_time):
+        # dont update if were pending removal
+        if self.state == 'pending removal':
+            return
         
+        self.set_texture()
+            
+        # set the position
+        self.position[0] += self.velocity[0]
+        self.position[1] += self.velocity[1]
+
+        self.spawn_particles()
+
+        for p in self.particles:
+            p.update()
+            if p.is_pending_removal():
+                 self.particles.remove(p)
 
 class EnemySprite(ClientSpriteObject):
     def __init__(self, screen_dimensions, object_id, object_state,
@@ -233,7 +293,7 @@ class EnemySprite(ClientSpriteObject):
     def spawn_particles(self):
         center_position = (self.position[0] + (self.get_width() / 2),
                            self.position[1] + (self.get_height() / 2))
-        particle = Particle(self.screen_dimensions, 'alive', center_position)
+        particle = Particle(self.screen_dimensions, 'basic', 'alive', center_position)
         self.particles.append(particle)
 
     def update(self, delta_time):
@@ -300,7 +360,7 @@ class ClientView():
         self.sprite_stats_directory = SpriteStatsDirectory()
 
         self.user_controlled_character = None
-        self.game_state_received = False
+        self.initial_game_state_received = False
 
         self.object_registry = object_registry
 
@@ -324,12 +384,13 @@ class ClientView():
     def _handle_user_mouse_input(self, mouse_button, mouse_position):
         grid_position = mapgrid.convert_position_to_grid_position(mouse_position, self.tile_size)
         if mouse_button == 'LEFT':
+            event = events.ShootProjectileRequestEvent(mouse_position)
+            self.eventManager.post(event)
+
+        elif mouse_button == 'RIGHT':
             if self.user_placing_tower == True:
                 event = events.PlaceWallRequestEvent(grid_position)
                 self.eventManager.post(event)
-
-        elif mouse_button == 'RIGHT':
-            pass
       
     def _add_object_to_game(self, object_type, object_id, object_position,
                             object_velocity, object_state):
@@ -354,9 +415,16 @@ class ClientView():
                                     object_position, object_velocity)
             self.wall_sprites.append(wallSprite)
             self.object_registry[object_id] = wallSprite
+
+        elif object_type == 'projectile':
+            projectileSprite = ProjectileSprite(self.screen_dimensions, object_id, object_state,
+                                                object_position, object_velocity)
+            self.projectile_sprites.append(projectileSprite)
+            self.object_registry[object_id] = projectileSprite
         
     def _update_game_state(self, object_packages):
         # recieved a list of game objects (characters, projectiles, etc...)
+        print len(object_packages)
         for object_package in object_packages:
             object_type = object_package['object_type']
             object_id = object_package['object_id']
@@ -364,21 +432,23 @@ class ClientView():
             object_velocity = object_package['object_velocity']
             object_state = object_package['object_state']
 
-            if object_id in self.object_registry:
-                current_object = self.object_registry[object_id] # get the object
+            if object_type != 'default':
 
-                # handle is the server sent us a grid position
-                if object_type in ['wall']:
-                    grid_position = object_position
-                    object_position = mapgrid.convert_grid_position_to_position(grid_position, self.tile_size)
-                current_object.set_position(object_position)
-                current_object.set_velocity(object_velocity)
-                current_object.set_state(object_state)
+                if object_id in self.object_registry:
+                    current_object = self.object_registry[object_id] # get the object
 
-            # if the object does not exist
-            else:
-                self._add_object_to_game(object_type, object_id, object_position,
-                                         object_velocity, object_state)
+                    # handle is the server sent us a grid position
+                    if object_type in ['wall']:
+                        grid_position = object_position
+                        object_position = mapgrid.convert_grid_position_to_position(grid_position, self.tile_size)
+                    current_object.set_position(object_position)
+                    current_object.set_velocity(object_velocity)
+                    current_object.set_state(object_state)
+
+                # if the object does not exist
+                else:
+                    self._add_object_to_game(object_type, object_id, object_position,
+                                             object_velocity, object_state)
                 
     def _update_objects(self, delta_time):              
         for w in self.wall_sprites:
@@ -398,6 +468,12 @@ class ClientView():
             if c.state == 'pending removal':
                 self.character_sprites.remove(c)
                 del self.object_registry[w.id]
+
+        for p in self.projectile_sprites:
+            p.update(delta_time)
+            if p.state == 'pending removal':
+                self.projectile_sprites.remove(p)
+                del self.object_registry[p.id]
                 
     def _render_display(self):
         rabbyt.clear((.2,.4,.7))
@@ -414,6 +490,9 @@ class ClientView():
         for c in self.character_sprites:
             c.render()
 
+        for p in self.projectile_sprites:
+            p.render()
+
         pygame.display.flip()
         # render everything
 
@@ -422,18 +501,28 @@ class ClientView():
             self._update_objects(event.delta_time)
             self._render_display()
 
-            event = events.CompleteGameStateRequestEvent()
-            self.eventManager.post(event)
+            # ask for a full game state
+            if not self.initial_game_state_received:
+                event = events.CompleteGameStateRequestEvent()
+                self.eventManager.post(event)
+            else:
+                event = events.ChangedGameStateRequestEvent()
+                self.eventManager.post(event)
 
-        elif event.name == 'Character States Event':
-            self._update_game_state(event.character_states)
+        elif event.name == 'Complete Game State Event':
+            self.initial_game_state_received = True
+            self._update_game_state(event.complete_game_state)
+
+        elif event.name == 'Changed Game State Event':
+            self._update_game_state(event.changed_game_state)
 
         elif event.name == 'User Mouse Input Event':
             mouse_button = event.mouse_button
             mouse_position = event.mouse_position
             self._handle_user_mouse_input(mouse_button, mouse_position)
-            
-if __name__ == '__main__':
+
+
+def main():
     object_registry = {}
     # creates messages to send every one second
     eventEncoder = events.EventEncoder()
@@ -447,6 +536,11 @@ if __name__ == '__main__':
     # class responsible for sending messages to the server
     messageSender = clientnetworkportal.MessageSender(eventManager, eventEncoder)
     clientnetworkportal.connect_to_server(messageSender)
+            
     programClock.run()
     reactor.run()
-
+            
+if __name__ == '__main__':
+    import cProfile
+    main()
+    #cProfile.run('main()')
