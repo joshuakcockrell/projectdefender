@@ -132,6 +132,9 @@ class CharacterState(ServerStateObject):
 
         self.set_id()
 
+    def get_position(self):
+        return self.position
+
     def package_state(self):
         if self.id:
             object_state = {'object_type': self.object_type,
@@ -291,7 +294,7 @@ class CharacterState(ServerStateObject):
 
 
             
-        self.position_has_changed = True
+        self.state_changed = True
 
         # HOW IT WILL WORK
         # check if four corners are colliding
@@ -604,6 +607,58 @@ class WallState(ServerStateObject):
 
         return command_request
 
+class ProjectileState(ServerStateObject):
+    '''represents a projectile in the server state'''
+    def __init__(self, collisionGrid, spawn_position, destination_position):
+        ServerStateObject.__init__(self)
+
+        self.state = 'alive'
+        self.object_type = 'projectile'
+        self.collisionGrid = collisionGrid
+
+        self.position = [spawn_position[0], spawn_position[1]]
+        self._set_velocity(destination_position)
+        self.speed = 6
+        
+        self.set_id()
+        
+        self.state_changed = True
+
+        print 'New projectile... id: ' + str(self.id)
+
+    def package_state(self):
+        if self.id:
+            object_state = {'object_type': self.object_type,
+                            'object_id': self.id,
+                            'object_position': self.position,
+                            'object_velocity': self.velocity,
+                            'object_state': self.state}
+            # if we are dead
+            if self.state == 'dead':
+                # we can now request removal from the game because we told the clients we are dead
+                self.state = 'pending removal'
+                
+            return object_state
+        else:
+            raise RuntimeError(str(self) + ' has no id')
+
+    def _set_velocity(self, destination_position):
+        if destination_position:
+            # set a vector for the target
+            vector_target_position = mapgrid.Vector(destination_position[0], destination_position[1])
+            # set a vector for our position
+            vector_position = mapgrid.Vector(self.position[0], self.position[1])
+            # subtract the vectors to find total displacement
+            displacement_to_target = vector_target_position - vector_position
+            # normalize to find direction to move
+            velocity = displacement_to_target.normalize()
+            # set that as our velocity
+            self.velocity = [velocity[0], velocity[1]]
+
+    def update(self):
+        
+        self.position[0] += (self.velocity[0] * self.speed)
+        self.position[1] += (self.velocity[1] * self.speed)
 
 class ClientState(ServerStateObject):
     '''
@@ -643,6 +698,7 @@ class ServerView():
         self.characters = {}
         self.enemies = {}
         self.walls = {}
+        self.projectiles = {}
         self.collisionGrid = mapgrid.CollisionGrid(self.map_dimensions)
         self.aiGrid = mapgrid.AIGrid(self.map_dimensions)
 
@@ -693,19 +749,26 @@ class ServerView():
                 wall.get_attacked(attack_damage)
 
     def _process_place_wall_request_event(self, event):
-        '''
-        when the user wants to place a wall
-        '''
+        '''when the user wants to place a wall'''
         if self.collisionGrid.is_tile_open(event.grid_position):
             # add a wall to the game
             wall = WallState(self.collisionGrid, self.aiGrid, event.grid_position)
             self.walls[wall.get_id()] = wall
 
+    def _process_shoot_projectile_request_event(self, event):
+        '''when the user wants to shoot a projectile'''
+        client_number = event.client_number
+        client = self.clients[client_number]
+        character = self.characters[client.character_id]
+        character_position = character.get_position()
+        
+        projectile = ProjectileState(self.collisionGrid, character_position, event.destination_position)
+        self.projectiles[projectile.get_id()] = projectile
+
     def _add_client_to_game(self, client_number, client_ip):
         clientState = ClientState(client_number, client_ip)
         self.clients[client_number] = clientState
         self._add_character_to_game(clientState.id, client_number)
-        self._send_full_state()
 
     def _add_character_to_game(self, client_id, client_number):
         characterState = CharacterState(client_id, client_number, self.collisionGrid, self.tile_size)
@@ -714,9 +777,17 @@ class ServerView():
         # let the client know it's character id
         self.clients[client_number].set_character_id(characterState.id)
         
-    def _send_full_state(self):
+    def _prepare_full_state(self):
         ''' sends full state regardless of if the state has changed '''
         object_states = []
+        default_state = object_state = {'object_type': 'default',
+                                        'object_id': 000000,
+                                        'object_position': [0.0, 0.0],
+                                        'object_velocity': [0.0, 0.0],
+                                        'object_state': 'default'}
+        
+        object_states.append(default_state)
+        
         for object_id in self.characters:
             current_object = self.characters[object_id]
             if current_object.state == 'pending removal':
@@ -746,25 +817,64 @@ class ServerView():
             object_states.append(object_state)
             if not object_state:
                 raise RuntimeError('Object state: ' + str(object_state))
+
+        for object_id in self.projectiles:
+            current_object = self.projectiles[object_id]
+            if current_object.state == 'pending removal':
+                raise RuntimeError('Object state: ' + str(object_state))
+            
+            object_state = current_object.package_state()
+            object_states.append(object_state)
+            if not object_state:
+                raise RuntimeError('Object state: ' + str(object_state))
                 
-        event = events.CharacterStatesEvent(object_states)
+        event = events.CompleteGameStateEvent(object_states)
         self.eventManager.post(event)
 
-    def _send_changed_state(self):
+    def _prepare_changed_state(self):
         ''' send state of objects that have changed their state '''
         object_states = []
+        default_state = object_state = {'object_type': 'default',
+                                        'object_id': 000000,
+                                        'object_position': [0.0, 0.0],
+                                        'object_velocity': [0.0, 0.0],
+                                        'object_state': 'default'}
+        
+        object_states.append(default_state)
+        
         for object_id in self.characters:
             current_object = self.characters[object_id]
             if current_object.state_has_changed():
                 object_state = current_object.package_state()
                 object_states.append(current_object.package_state())
+                if not object_state:
+                    raise RuntimeError('Object state: ' + str(object_state))
+
+        for object_id in self.enemies:
+            current_object = self.enemies[object_id]
+            if current_object.state_has_changed():
+                object_state = current_object.package_state()
+                object_states.append(current_object.package_state())
+                if not object_state:
+                    raise RuntimeError('Object state: ' + str(object_state))
                 
         for object_id in self.walls:
             current_object = self.walls[object_id]
             if current_object.state_has_changed(): 
                 object_state = current_object.package_state()
                 object_states.append(object_state)
-        event = events.CharacterStatesEvent(object_states)
+                if not object_state:
+                    raise RuntimeError('Object state: ' + str(object_state))
+
+        for object_id in self.projectiles:
+            current_object = self.projectiles[object_id]
+            if current_object.state_has_changed():
+                object_state = current_object.package_state()
+                object_states.append(object_state)
+                if not object_state:
+                    raise RuntimeError('Object state: ' + str(object_state))
+                
+        event = events.ChangedGameStateEvent(object_states)
         self.eventManager.post(event)
 
     def _update_objects(self):
@@ -786,6 +896,9 @@ class ServerView():
             if command_request['request'] == 'removal request':
                 wall_ids_to_remove.append(object_id)
 
+        for object_id in self.projectiles:
+            command_request = self.projectiles[object_id].update()
+
         for i in wall_ids_to_remove:
             del self.walls[i]
                 
@@ -796,17 +909,21 @@ class ServerView():
         if event.name == 'Tick Event':
             # !@$%!@%!# SHOULD SEND CHANGED !%@!^#^!
             self._update_objects()
-            self._send_full_state()
+            self._prepare_changed_state()
+            self._prepare_full_state()
 
         elif event.name == 'New Client Connected Event':
             self._add_client_to_game(event.client_number, event.client_ip)
-            self._send_full_state()
+            self._prepare_full_state()
             
         elif event.name == 'User Keyboard Input Event':
             self._process_user_keyboard_input_event(event)
 
         elif event.name == 'Place Wall Request Event':
             self._process_place_wall_request_event(event)
+
+        elif event.name == 'Shoot Projectile Request Event':
+            self._process_shoot_projectile_request_event(event)
 
         elif event.name == 'Add Enemy To Game Request Event':
             self._process_add_enemy_to_game_request_event(event)

@@ -6,8 +6,10 @@ from twisted.internet.error import ConnectionDone
 import events
 from serverfactory import RemoteTextMessageEvent
 from serverfactory import RemoteCompleteGameStateRequestEvent
+from serverfactory import RemoteChangedGameStateRequestEvent
 from serverfactory import RemoteUserKeyboardInputEvent
 from serverfactory import RemotePlaceWallRequestEvent
+from serverfactory import RemoteShootProjectileRequestEvent
 
 class MessageSender():
     ''' This object is used to send messages over the wire'''
@@ -23,7 +25,7 @@ class MessageSender():
         '''
         # this is a callback from the TCP connect
         print 'The server: ' + str(server)
-        self.server = server # store the serverw
+        self.server = server # store the server
 
     # Sending to server
     def send_message(self, event):
@@ -47,9 +49,18 @@ class MessageSender():
                                                         message = encoded_event)
                     remoteCall.addCallback(self.InputReceived)
 
+                elif event.name == 'Shoot Projectile Request Event':
+                    encoded_event = self.eventEncoder.encode_event(event)
+                    remoteCall = self.server.callRemote(RemoteShootProjectileRequestEvent,
+                                                        message = encoded_event)
+
                 elif event.name == 'Complete Game State Request Event':
                     remoteCall = self.server.callRemote(RemoteCompleteGameStateRequestEvent, message = event.name)
                     remoteCall.addCallback(self.CompleteGameStateReceived)
+
+                elif event.name == 'Changed Game State Request Event':
+                    remoteCall = self.server.callRemote(RemoteChangedGameStateRequestEvent, message = event.name)
+                    remoteCall.addCallback(self.ChangedGameStateReceived)
                 else:
                     print 'The event <' + event.name + '> cannot be sent over the network!'
                     
@@ -64,9 +75,14 @@ class MessageSender():
 
     def CompleteGameStateReceived(self, game_state):
         ''' This is added as a callback when sending a game update request '''
-        event = events.CharacterStatesEvent(game_state['response'])
+        event = events.CompleteGameStateEvent(game_state['response'])
         self.eventManager.post(event)
-                
+
+    def ChangedGameStateReceived(self, game_state):
+        ''' This is added as a callback when sending a game update request '''
+        event = events.ChangedGameStateEvent(game_state['response'])
+        self.eventManager.post(event)
+        
     def notify(self, event):
         self.send_message(event)
 
