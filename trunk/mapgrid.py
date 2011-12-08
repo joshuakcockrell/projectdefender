@@ -138,9 +138,10 @@ class MapGrid():
         '''
         gets a position on a grid and returns its value
         '''
-
-        value = grid[position[0]][position[1]]
-
+        try:
+            value = grid[position[0]][position[1]]
+        except IndexError:
+            value = None
         return value
 
     def get_random_direction(self):
@@ -178,6 +179,144 @@ class CollisionGrid(MapGrid):
         elif value == 0:
             # the tile is open
             return True
+        elif value == None:
+            return True
+        else:
+            raise RuntimeError('Incorrect tile value: ' + str(value))
+
+    def get_surrounding_tiles(self, column_index, tile_index):
+        '''Goes through all the surrounding tiles, and returns the lowest value of each one'''
+                                            
+        # get the surrounding tile values for each tile
+        x = column_index
+        y = tile_index
+
+        # TOP ROW 
+        # if too far up
+        if y - 1 < 0:
+            top_left = None
+            top_mid = None
+            top_right = None
+        else:
+            
+            # TOP LEFT
+            # if too far left 
+            if x - 1 < 0:
+                top_left = None
+            else:
+                try:
+                    top_left = self.collision_grid[x - 1][y - 1]
+                # handle too far right or down
+                except IndexError:
+                    top_left = None
+            
+
+            # TOP MID
+            # if too far left
+            if x < 0:
+                top_mid = None
+
+            else:
+                try:
+                    top_mid = self.collision_grid[x][y - 1]
+                # if too far right or down
+                except IndexError:
+                    top_mid = None
+
+            # TOP RIGHT
+            # if too far left
+            if x + 1 < 0:
+                top_right = None
+            else:
+                try:
+                    top_right = self.collision_grid[x + 1][y - 1]
+                except IndexError:
+                    top_right = None
+                    
+        # CENTER ROW
+        # if too far up
+        if y < 0:
+            center_left = None
+            center_mid = None
+            center_right = None
+
+        else:
+            # CENTER LEFT
+            # if too far left
+            if x - 1 < 0:
+                center_left = None
+            else:
+                try:
+                    center_left = self.collision_grid[x - 1][y]
+                    # if too far right or down
+                except IndexError:
+                    center_left = None
+
+            # CENTER MID
+            # if too far left
+            if x < 0:
+                center_mid = None
+            else:
+                try:
+                    center_mid = self.collision_grid[x][y]
+                # if too far right or down
+                except IndexError:
+                    center_mid = None
+
+            # CENTER RIGHT
+            # if too far left
+            if x + 1 < 0:
+                center_right = None
+            else:
+                try:
+                    center_right = self.collision_grid[x + 1][y]
+                # if too far right or down
+                except IndexError:
+                    center_right = None
+                    
+
+        # BOTTOM ROW
+        # if too far up
+        if y + 1 < 0:
+            bottom_left = None
+            bottom_mid = None
+            bottom_right = None
+        else:
+            # BOTTOM LEFT
+            # if too far left
+            if x - 1 < 0:
+                bottom_left = None
+            else:
+                try:
+                    bottom_left = self.collision_grid[x - 1][y + 1]
+                # if too far right or down
+                except IndexError:
+                    bottom_left = None
+
+            # BOTTOM MID
+            # if too far left
+            if x < 0:
+                bottom_mid = None
+            else:
+                try:
+                    bottom_mid = self.collision_grid[x][y + 1]
+                # if too far right or down
+                except IndexError:
+                    bottom_mid = None
+
+            # BOTTOM RIGHT
+            # if too far left
+            if x + 1 < 0:
+                bottom_right = None
+            else:
+                try:
+                    bottom_right = self.collision_grid[x + 1][y + 1]
+                # if too far right or down
+                except IndexError:
+                    bottom_right = None
+        return (top_left, top_mid, top_right,
+                center_left, center_mid, center_right,
+                bottom_left, bottom_mid, bottom_right)
     
 class TerrainGrid(MapGrid):
 

@@ -26,10 +26,12 @@ class UserInputManager():
 
                 elif event.type == pygame.MOUSEBUTTONDOWN: # all the mouse down events
                     if event.button == 3: # right mouse button
+                        print 'pressed the right mouse button'
                         self.shooting = False
                         mouse_button = 'RIGHT'
                         mouse_position = event.pos
-                        pass
+                        newEvent = events.UserMouseInputEvent(mouse_button, mouse_position)
+
                     elif event.button == 1: # left mouse button
                         self.shooting = True
                         mouse_button = 'LEFT'

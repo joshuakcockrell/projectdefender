@@ -59,7 +59,7 @@ class EnemyGenerator():
         self.spawn_position = (500, 500)
         self.spawn_timer = 2 # seconds between spawns
         self.current_spawn_timer = 0 # starts at 0
-        self.max_enemies = 1
+        self.max_enemies = 7
         self.created_enemies = 0
 
     def _get_spawn_position(self):
@@ -88,6 +88,12 @@ class ServerStateObject():
         self.id = None
         self.eventManager = None
         self.state_changed = False
+        self.state = None
+        self.grid_position = None
+        self.previous_grid_position = None
+        
+        self.sent_full_dead_state = False # we only need to let the client know we're dead once
+        self.sent_changed_dead_state = False # we only need to let the client know we're dead once
 
     def state_has_changed(self):
         if self.state_changed:
@@ -102,6 +108,53 @@ class ServerStateObject():
 
     def get_id(self):
         return self.id
+
+    def set_grid_position(self):
+        self.previous_grid_position = self.grid_position
+        self.grid_position = mapgrid.convert_position_to_grid_position(self.position, self.tile_size)
+
+    def _get_object_state(self):
+        '''packages our state into a dict'''
+        object_state = {'object_type': self.object_type,
+                        'object_id': self.id,
+                        'object_position': self.position,
+                        'object_velocity': self.velocity,
+                        'object_state': self.state}
+        return object_state
+
+    def package_state(self, request_type):
+        '''package our state so we can easily send it to the clients
+
+        request type can be either 'full' or 'changed'
+        we only want to send our state one time to each of the
+        requests, if we are dead and we send it one time to each
+        of those requests then we can determine that the clients know
+        we are dead, so we can change our state to pending removal
+        '''
+        if request_type == 'full':
+            if self.id:
+                object_state = self._get_object_state()
+                if self.state == 'dead':
+                    # we can now request removal from the game because we told the clients we are dead
+                    self.sent_full_dead_state = True
+            else:
+                raise RuntimeError(str(self) + ' has no id')
+
+        elif request_type == 'changed':
+            if self.id:
+                object_state = self._get_object_state()
+                if self.state == 'dead':
+                    # we can now request removal from the game because we told the clients we are dead
+                    self.sent_changed_dead_state = True  
+            else:
+                raise RuntimeError(str(self) + ' has no id')
+        else:
+            raise RuntimeError(str(request_type))
+
+        if self.sent_full_dead_state == True and self.sent_changed_dead_state == True:
+            self.state = 'pending removal'
+
+        return object_state
         
     def update(self, delta_time):
         pass
@@ -134,17 +187,6 @@ class CharacterState(ServerStateObject):
 
     def get_position(self):
         return self.position
-
-    def package_state(self):
-        if self.id:
-            object_state = {'object_type': self.object_type,
-                            'object_id': self.id,
-                            'object_position': self.position,
-                            'object_velocity': self.velocity,
-                            'object_state': self.state}
-            return object_state
-        else:
-            raise RuntimeError(str(self) + ' has no id')
 
     def _push_position_to_nearest_open_tile(self, left_position, right_position,
                                             top_position, bottom_position,
@@ -304,12 +346,12 @@ class CharacterState(ServerStateObject):
         ##### see which wall has the smallest distance to travel
         # push the character out to that wall
 
-    def update(self):
+    def update(self, delta_time):
         # so the server knows if this object needs something
         command_request = None
         
-        self.position[0] += self.velocity[0]
-        self.position[1] += self.velocity[1]
+        self.position[0] += self.velocity[0] * delta_time
+        self.position[1] += self.velocity[1] * delta_time
 
         return command_request
 
@@ -326,7 +368,7 @@ class EnemyState(ServerStateObject):
         self.tile_size = tile_size
 
         self.center_grid_position = self.get_center_grid_position()
-        self.speed = 0.3
+        self.speed = 10
         self.velocity = [0.0,0.0]
         self.attack_timer = 300
         self.base_attack_damage = 1
@@ -348,19 +390,8 @@ class EnemyState(ServerStateObject):
         grid_position = mapgrid.convert_position_to_grid_position(self.position, self.tile_size)
         center_grid_position = mapgrid.convert_position_to_grid_position(center_position, self.tile_size)
         return center_grid_position
-    
-    def package_state(self):
-        if self.id:
-            object_state = {'object_type': self.object_type,
-                            'object_id': self.id,
-                            'object_position': self.position,
-                            'object_velocity': self.velocity,
-                            'object_state': self.state}
-            return object_state
-        else:
-            raise RuntimeError(str(self) + ' has no id')
 
-    def _move(self, destination_position):
+    def _move(self, destination_position, delta_time):
         if destination_position:
             # set a vector for the target
             vector_target_position = mapgrid.Vector(destination_position[0], destination_position[1])
@@ -371,17 +402,17 @@ class EnemyState(ServerStateObject):
             # normalize to find direction to move
             velocity = displacement_to_target.normalize()
             # set that as our velocity
-            self.velocity = [velocity[0], velocity[1]]
+            self.velocity = [velocity[0] * self.speed, velocity[1] * self.speed]
             # move the position
             if displacement_to_target[0] ** 2 < self.speed ** 2:
                 self.position[0] += displacement_to_target[0]
             else:
-                self.position[0] += (self.velocity[0] * self.speed)
+                self.position[0] += self.velocity[0] * delta_time
 
             if displacement_to_target[1] ** 2 < self.speed ** 2:
                 self.position[1] += displacement_to_target[1]
             else:
-                self.position[1] += (self.velocity[1] * self.speed)
+                self.position[1] += self.velocity[1] * delta_time
 
     def _random_roaming_chance(self):
         '''Returns true if we are going to randomly roam'''
@@ -480,7 +511,7 @@ class EnemyState(ServerStateObject):
         '''logic to determine how much damage an attack will do goes here'''
         return self.base_attack_damage
         
-    def update(self):
+    def update(self, delta_time):
 
         # so the server knows if this object needs something
         command_request = {'request': None}
@@ -501,17 +532,17 @@ class EnemyState(ServerStateObject):
                 command_request['request'] = 'attack request'
                 command_request['damage'] = self._get_attack_damage()
 
-            self._move(self.previous_target_position)
+            self._move(self.previous_target_position, delta_time)
         
         elif self.state == 'moving':
             if self.target_grid_position:
                 # get position of target
                 self.target_position = mapgrid.convert_grid_position_to_position(self.target_grid_position, self.tile_size)
-                self._move(self.target_position)
+                self._move(self.target_position, delta_time)
 
         elif self.state == 'roaming':
             if self.roaming_target_position:
-                self._move(self.roaming_target_position)
+                self._move(self.roaming_target_position, delta_time)
             else:
                 raise RuntimeError('No roaming target position: ' + str(self.roaming_target_position))
                 
@@ -554,6 +585,15 @@ class WallState(ServerStateObject):
                                        self.starting_generation,
                                        self)
 
+    def _get_object_state(self):
+        '''packages our state into a dict'''
+        object_state = {'object_type': self.object_type,
+                        'object_id': self.id,
+                        'object_position': self.grid_position,
+                        'object_velocity': self.velocity,
+                        'object_state': self.state}
+        return object_state
+
     def get_grid_position(self):
         return self.grid_position
 
@@ -564,22 +604,6 @@ class WallState(ServerStateObject):
         for p in self.ai_children_positions:
             self.aiGrid.remove_child(self, p)
         self.ai_children_positions = []
-
-    def package_state(self):
-        if self.id:
-            object_state = {'object_type': self.object_type,
-                            'object_id': self.id,
-                            'object_position': self.grid_position,
-                            'object_velocity': self.velocity,
-                            'object_state': self.state}
-            # if we are dead
-            if self.state == 'dead':
-                # we can now request removal from the game because we told the clients we are dead
-                self.state = 'pending removal'
-                
-            return object_state
-        else:
-            raise RuntimeError(str(self) + ' has no id')
 
     def destroy_wall(self):
         '''destroy this objects influence on the game world'''
@@ -598,7 +622,7 @@ class WallState(ServerStateObject):
         if self.health <= 0:
             self.destroy_wall()
 
-    def update(self):
+    def update(self, delta_time):
         command_request = {'request': None}
         # if we're waiting to be removed from the game
         if self.state == 'pending removal':
@@ -609,38 +633,27 @@ class WallState(ServerStateObject):
 
 class ProjectileState(ServerStateObject):
     '''represents a projectile in the server state'''
-    def __init__(self, collisionGrid, spawn_position, destination_position):
+    def __init__(self, collisionGrid, map_size, tile_size, spawn_position, destination_position):
         ServerStateObject.__init__(self)
 
         self.state = 'alive'
         self.object_type = 'projectile'
         self.collisionGrid = collisionGrid
+        self.map_size = map_size
+        self.tile_size = tile_size
 
         self.position = [spawn_position[0], spawn_position[1]]
+        self.set_grid_position()
+        self.speed = 300
         self._set_velocity(destination_position)
-        self.speed = 6
+        self.direction_changes = 0
+        self.max_direction_changes = 5
         
         self.set_id()
         
         self.state_changed = True
 
         print 'New projectile... id: ' + str(self.id)
-
-    def package_state(self):
-        if self.id:
-            object_state = {'object_type': self.object_type,
-                            'object_id': self.id,
-                            'object_position': self.position,
-                            'object_velocity': self.velocity,
-                            'object_state': self.state}
-            # if we are dead
-            if self.state == 'dead':
-                # we can now request removal from the game because we told the clients we are dead
-                self.state = 'pending removal'
-                
-            return object_state
-        else:
-            raise RuntimeError(str(self) + ' has no id')
 
     def _set_velocity(self, destination_position):
         if destination_position:
@@ -653,12 +666,104 @@ class ProjectileState(ServerStateObject):
             # normalize to find direction to move
             velocity = displacement_to_target.normalize()
             # set that as our velocity
-            self.velocity = [velocity[0], velocity[1]]
+            self.velocity = [velocity[0] * self.speed, velocity[1] * self.speed]
 
-    def update(self):
+    def _switch_x_direction(self):
+        self.velocity = [self.velocity[0] * -1, self.velocity[1]]
+
+    def _switch_y_direction(self):
+        self.velocity = [self.velocity[0], self.velocity[1] * -1]
         
-        self.position[0] += (self.velocity[0] * self.speed)
-        self.position[1] += (self.velocity[1] * self.speed)
+    def _switch_direction(self):
+        prev_x = self.previous_grid_position[0]
+        prev_y = self.previous_grid_position[1]
+
+        x = self.grid_position[0]
+        y = self.grid_position[1]
+
+        delta_x = x - prev_x
+        delta_y = y - prev_y
+
+        (top_left, top_mid, top_right,
+         center_left, center_mid, center_right,
+         bottom_left, bottom_mid, bottom_right) = self.collisionGrid.get_surrounding_tiles(x, y)
+
+        if delta_x < 0:
+            if delta_y < 0:
+                # top left
+                if center_left == 0:# if the spot is open
+                    self._switch_x_direction()
+                if top_mid == 0:# if the spot is open
+                    self._switch_y_direction()
+                    
+            elif delta_y == 0:
+                # center left
+                self._switch_x_direction()
+                
+            elif delta_y > 0:
+                # bot left
+                if center_left == 0:# if the spot is open
+                    self._switch_x_direction()
+                if bottom_mid == 0:# if the spot is open
+                    self._switch_y_direction()
+
+        elif delta_x == 0:
+            if delta_y < 0:# top mid
+                self._switch_y_direction()
+                
+            elif delta_y == 0:# center mid
+                self._switch_x_direction()
+                self._switch_y_direction()
+                
+            elif delta_y > 0:# bot mid
+                self._switch_y_direction()
+
+        elif delta_x > 0:
+            if delta_y < 0:# top right
+                if center_right == 0:# if the spot is open
+                    self._switch_x_direction()
+                if top_mid == 0:# if the spot is open
+                    self._switch_y_direction()
+                    
+            elif delta_y == 0:# center right
+                self._switch_x_direction()
+                
+            elif delta_y > 0:# bot right
+                if center_right == 0:# if the spot is open
+                    self._switch_x_direction()
+                if bottom_mid == 0:# if the spot is open
+                    self._switch_y_direction()
+
+    def update(self, delta_time, enemies):
+        
+        command_request = {'request': None}
+        # if we're waiting to be removed from the game
+        if self.state == 'pending removal':
+            # request to be removed
+            command_request['request'] = 'removal request'
+            return command_request
+        
+        self.position[0] += (self.velocity[0] * delta_time)
+        self.position[1] += (self.velocity[1] * delta_time)
+
+        if self.position[0] < 0 or self.position[0] > self.map_size[0]:
+            self.state = 'dead'
+            self.state_changed = True
+        if self.position[1] < 0 or self.position[1] > self.map_size[1]:
+            self.state = 'dead'
+            self.state_changed = True
+
+        self.set_grid_position()
+
+        if not self.collisionGrid.is_tile_open(self.grid_position): # if the position is closed
+            self._switch_direction()
+            self.direction_changes += 1
+            self.state_changed = True
+            if self.direction_changes >= self.max_direction_changes:
+                self.state = 'dead'
+                self.state_changed = True
+
+        return command_request
 
 class ClientState(ServerStateObject):
     '''
@@ -693,6 +798,9 @@ class ServerView():
 
         self.map_dimensions = [25, 20]
         self.tile_size = 32
+        self.map_width = self.map_dimensions[0] * self.tile_size
+        self.map_height = self.map_dimensions[1] * self.tile_size
+        self.map_size = [self.map_width, self.map_height]
 
         self.clients = {}
         self.characters = {}
@@ -762,7 +870,7 @@ class ServerView():
         character = self.characters[client.character_id]
         character_position = character.get_position()
         
-        projectile = ProjectileState(self.collisionGrid, character_position, event.destination_position)
+        projectile = ProjectileState(self.collisionGrid, self.map_size, self.tile_size, character_position, event.destination_position)
         self.projectiles[projectile.get_id()] = projectile
 
     def _add_client_to_game(self, client_number, client_ip):
@@ -793,7 +901,7 @@ class ServerView():
             if current_object.state == 'pending removal':
                 raise RuntimeError('Object state: ' + str(object_state))
             
-            object_state = current_object.package_state()
+            object_state = current_object.package_state('full')
             object_states.append(object_state)
             if not object_state:
                 raise RuntimeError('Object state: ' + str(object_state))
@@ -803,7 +911,7 @@ class ServerView():
             if current_object.state == 'pending removal':
                 raise RuntimeError('Object state: ' + str(object_state))
             
-            object_state = current_object.package_state()
+            object_state = current_object.package_state('full')
             object_states.append(object_state)
             if not object_state:
                 raise RuntimeError('Object state: ' + str(object_state))
@@ -813,7 +921,7 @@ class ServerView():
             if current_object.state == 'pending removal':
                 raise RuntimeError('Object state: ' + str(object_state))
             
-            object_state = current_object.package_state()
+            object_state = current_object.package_state('full')
             object_states.append(object_state)
             if not object_state:
                 raise RuntimeError('Object state: ' + str(object_state))
@@ -823,7 +931,7 @@ class ServerView():
             if current_object.state == 'pending removal':
                 raise RuntimeError('Object state: ' + str(object_state))
             
-            object_state = current_object.package_state()
+            object_state = current_object.package_state('full')
             object_states.append(object_state)
             if not object_state:
                 raise RuntimeError('Object state: ' + str(object_state))
@@ -845,23 +953,23 @@ class ServerView():
         for object_id in self.characters:
             current_object = self.characters[object_id]
             if current_object.state_has_changed():
-                object_state = current_object.package_state()
-                object_states.append(current_object.package_state())
+                object_state = current_object.package_state('changed')
+                object_states.append(object_state)
                 if not object_state:
                     raise RuntimeError('Object state: ' + str(object_state))
 
         for object_id in self.enemies:
             current_object = self.enemies[object_id]
             if current_object.state_has_changed():
-                object_state = current_object.package_state()
-                object_states.append(current_object.package_state())
+                object_state = current_object.package_state('changed')
+                object_states.append(object_state)
                 if not object_state:
                     raise RuntimeError('Object state: ' + str(object_state))
                 
         for object_id in self.walls:
             current_object = self.walls[object_id]
             if current_object.state_has_changed(): 
-                object_state = current_object.package_state()
+                object_state = current_object.package_state('changed')
                 object_states.append(object_state)
                 if not object_state:
                     raise RuntimeError('Object state: ' + str(object_state))
@@ -869,7 +977,7 @@ class ServerView():
         for object_id in self.projectiles:
             current_object = self.projectiles[object_id]
             if current_object.state_has_changed():
-                object_state = current_object.package_state()
+                object_state = current_object.package_state('changed')
                 object_states.append(object_state)
                 if not object_state:
                     raise RuntimeError('Object state: ' + str(object_state))
@@ -877,14 +985,16 @@ class ServerView():
         event = events.ChangedGameStateEvent(object_states)
         self.eventManager.post(event)
 
-    def _update_objects(self):
+    def _update_objects(self, delta_time):
+
+        
         for object_id in self.characters:
             # update the character, will return an optional request
-            command_requet = self.characters[object_id].update()
+            command_requet = self.characters[object_id].update(delta_time)
             
         for object_id in self.enemies:
             # update the enemy, will return an optional request
-            command_request = self.enemies[object_id].update()
+            command_request = self.enemies[object_id].update(delta_time)
             if command_request['request'] == 'attack request':
                 enemy = self.enemies[object_id]
                 attack_damage = command_request['damage']
@@ -892,15 +1002,20 @@ class ServerView():
 
         wall_ids_to_remove = []
         for object_id in self.walls:
-            command_request = self.walls[object_id].update()
+            command_request = self.walls[object_id].update(delta_time)
             if command_request['request'] == 'removal request':
-                wall_ids_to_remove.append(object_id)
-
-        for object_id in self.projectiles:
-            command_request = self.projectiles[object_id].update()
-
+                wall_ids_to_remove.append(object_id)           
         for i in wall_ids_to_remove:
             del self.walls[i]
+
+        projectile_ids_to_remove = []
+        for object_id in self.projectiles:
+            command_request = self.projectiles[object_id].update(delta_time,
+                                                                 self.enemies)
+            if command_request['request'] == 'removal request':
+                projectile_ids_to_remove.append(object_id)
+        for i in projectile_ids_to_remove:
+            del self.projectiles[i]
                 
         self.aiGrid.update()
         self.enemyGenerator.update(delta_time = 0.025)
@@ -908,7 +1023,7 @@ class ServerView():
     def notify(self, event):
         if event.name == 'Tick Event':
             # !@$%!@%!# SHOULD SEND CHANGED !%@!^#^!
-            self._update_objects()
+            self._update_objects(event.delta_time)
             self._prepare_changed_state()
             self._prepare_full_state()
 
