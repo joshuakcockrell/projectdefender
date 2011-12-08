@@ -13,6 +13,7 @@ from pygame.locals import *
 
 import rabbyt
 
+import propertiesloader
 import events
 import userinputmanager
 import clientnetworkportal
@@ -559,7 +560,8 @@ def main():
     
     # class responsible for sending messages to the server
     messageSender = clientnetworkportal.MessageSender(eventManager, eventEncoder)
-    clientnetworkportal.connect_to_server(messageSender)
+    ip_address = propertiesloader.load_properties()
+    clientnetworkportal.connect_to_server(messageSender, ip_address)
             
     programClock.run()
     reactor.run()
