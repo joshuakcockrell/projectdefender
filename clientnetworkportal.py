@@ -86,6 +86,6 @@ class MessageSender():
     def notify(self, event):
         self.send_message(event)
 
-def connect_to_server(messageSender):
-    connection = ClientCreator(reactor, amp.AMP).connectTCP('localhost', 12345)
+def connect_to_server(messageSender, ip_address='localhost'):
+    connection = ClientCreator(reactor, amp.AMP).connectTCP(ip_address, 12345)
     connection.addCallback(messageSender.connected)
