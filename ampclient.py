@@ -6,6 +6,7 @@ import time
 import os
 import math
 import random
+from random import getrandbits #speed up or particle stuff
 
 import pygame
 from pygame.locals import *
@@ -74,6 +75,8 @@ class ClientSpriteObject(rabbyt.Sprite):
         rabbyt.Sprite.__init__(self, texture=None)
 
         self.screen_dimensions = screen_dimensions
+        self.half_screen_width = self.screen_dimensions[0] / 2
+        self.half_screen_height = self.screen_dimensions[1] / 2
         self.id = object_id
         self.state = object_state
         self.position = None
@@ -118,13 +121,15 @@ class ClientSpriteObject(rabbyt.Sprite):
             if self.texture != self.textures[self.state]:
                 # use the correct texture
                 self.texture = self.textures[self.state]
+                
+        self.texture_width = self.get_width()
+        self.texture_height = self.get_height()
+        self.half_texture_width = self.texture_width / 2
+        self.half_texture_height = self.texture_height / 2
 
     def set_render_position(self):
-        texture_width = self.get_width()
-        texture_height = self.get_height()
-        
-        self.x = (self.position[0] - (self.screen_dimensions[0] / 2) + (texture_width / 2))
-        self.y = (( -1 * self.position[1]) + (self.screen_dimensions[1] / 2) - (texture_width / 2))
+        self.x = (self.position[0] - self.half_screen_width + self.half_texture_width)
+        self.y = (( -1 * self.position[1]) + self.half_screen_height - self.half_texture_width)
 
     def get_width(self):
         return self.right - self.left
@@ -133,8 +138,9 @@ class ClientSpriteObject(rabbyt.Sprite):
         return self.top - self.bottom
     
     def render(self):
-        self.set_render_position()
-        rabbyt.Sprite.render(self)
+        if self.state != 'dead':
+            self.set_render_position()
+            rabbyt.Sprite.render(self)
         if self.particles:
             rabbyt.render_unsorted(self.particles)
 
@@ -154,7 +160,8 @@ class Particle(ClientSpriteObject):
         self._load_textures()
         self.set_texture()
 
-        self.speed = .001
+        self.speed = 50
+        self.decay_time = 4.0
         object_velocity = self._get_random_velocity()
 
         self.set_center_position(object_position)
@@ -169,28 +176,32 @@ class Particle(ClientSpriteObject):
             self.textures['yellow'] = os.path.join('resources', 'yellowbullet.png')
 
     def _get_random_velocity(self):
-        velocity_x = random.random() * random.choice([-1, 1])
-        velocity_y = random.random() * random.choice([-1, 1])
+        velocity_x = (random.random() * random.choice([-1, 1]) * self.speed)
+        velocity_y = (random.random() * random.choice([-1, 1]) * self.speed)
         return (velocity_x, velocity_y)
 
     def is_pending_removal(self):
         if self.state == 'pending removal':
             return True
 
-    def update(self):
-        if self.state != 'pending removal':
-            self.position[0] += self.velocity[0]
-            self.position[1] += self.velocity[1]
+    def _set_random_texture(self):
+        # SOO SLOW
+        if getrandbits(1):
+            self.texture = self.textures['alive']
+        else:
+            self.texture = self.textures['yellow']
+            
 
-            self.alpha -= .01
+    def update(self, delta_time):
+        if self.state != 'pending removal':
+            self.position[0] += self.velocity[0] * delta_time
+            self.position[1] += self.velocity[1] * delta_time
+
+            self.alpha -= delta_time / self.decay_time
             if self.alpha <= 0:
                 self.state = 'pending removal'
 
-            if random.choice([True, False]):
-                self.texture = self.textures['alive']
-            else:
-                self.texture = self.textures['yellow']
-
+        #self._set_random_texture()
         
 class WallSprite(ClientSpriteObject):
     def __init__(self, screen_dimensions, object_id, object_state,
@@ -226,8 +237,8 @@ class WallSprite(ClientSpriteObject):
         self.set_texture()
             
         # set the position
-        self.position[0] += self.velocity[0]
-        self.position[1] += self.velocity[1]
+        self.position[0] += self.velocity[0] * delta_time
+        self.position[1] += self.velocity[1] * delta_time
 
 class ProjectileSprite(ClientSpriteObject):
     def __init__(self, screen_dimensions, object_id, object_state,
@@ -237,6 +248,9 @@ class ProjectileSprite(ClientSpriteObject):
         self._load_textures()
         self.set_texture()
 
+        self.particle_timer = 0.0
+        self.time_between_particles = .015
+
         self.set_position(object_position)
         self.set_velocity(object_velocity)
 
@@ -244,30 +258,40 @@ class ProjectileSprite(ClientSpriteObject):
 
     def _load_textures(self):
         self.textures['alive'] = os.path.join('resources','blackbullet.png')
+        self.textures['dead'] = os.path.join('resources','blackbullet.png')
 
-    def spawn_particles(self):
+    def spawn_particles(self, delta_time):
+        self.particle_timer += delta_time
         center_position = (self.position[0] + (self.get_width() / 2),
-                           self.position[1] + (self.get_height() / 2))
-        particle = Particle(self.screen_dimensions, 'glitter', 'alive', center_position)
-        self.particles.append(particle)
+                               self.position[1] + (self.get_height() / 2))
+        
+        while self.particle_timer >= self.time_between_particles:
+            self.particle_timer -= self.time_between_particles
+            particle = Particle(self.screen_dimensions, 'glitter', 'alive', center_position)
+            self.particles.append(particle)
 
     def update(self, delta_time):
         # dont update if were pending removal
         if self.state == 'pending removal':
             return
-        
-        self.set_texture()
-            
-        # set the position
-        self.position[0] += self.velocity[0]
-        self.position[1] += self.velocity[1]
-
-        self.spawn_particles()
 
         for p in self.particles:
-            p.update()
-            if p.is_pending_removal():
-                 self.particles.remove(p)
+                p.update(delta_time)
+                if p.is_pending_removal():
+                     self.particles.remove(p)
+
+        if self.state == 'dead':
+            if len(self.particles) <= 0:
+                self.state = 'pending removal'
+
+        else:
+        
+            self.set_texture()
+            #self.spawn_particles(delta_time)
+                
+            # set the position
+            self.position[0] += self.velocity[0] * delta_time
+            self.position[1] += self.velocity[1] * delta_time
 
 class EnemySprite(ClientSpriteObject):
     def __init__(self, screen_dimensions, object_id, object_state,
@@ -302,16 +326,17 @@ class EnemySprite(ClientSpriteObject):
             return
 
         if self.state == 'attacking':
-            self.spawn_particles()
+            pass
+            #self.spawn_particles()
         
         self.set_texture()
             
         # set the position
-        self.position[0] += self.velocity[0]
-        self.position[1] += self.velocity[1]
+        self.position[0] += self.velocity[0] * delta_time
+        self.position[1] += self.velocity[1] * delta_time
 
         for p in self.particles:
-            p.update()
+            p.update(delta_time)
             if p.is_pending_removal():
                  self.particles.remove(p)
           
@@ -341,8 +366,8 @@ class CharacterSprite(ClientSpriteObject):
         self.set_texture()
         
         # set the position
-        self.position[0] += self.velocity[0]
-        self.position[1] += self.velocity[1]
+        self.position[0] += self.velocity[0] * delta_time
+        self.position[1] += self.velocity[1] * delta_time
 
 class ClientView():
     def __init__(self, eventManager, object_registry):
@@ -424,7 +449,6 @@ class ClientView():
         
     def _update_game_state(self, object_packages):
         # recieved a list of game objects (characters, projectiles, etc...)
-        print len(object_packages)
         for object_package in object_packages:
             object_type = object_package['object_type']
             object_id = object_package['object_id']
@@ -437,7 +461,7 @@ class ClientView():
                 if object_id in self.object_registry:
                     current_object = self.object_registry[object_id] # get the object
 
-                    # handle is the server sent us a grid position
+                    # handle if the server sent us a grid position
                     if object_type in ['wall']:
                         grid_position = object_position
                         object_position = mapgrid.convert_grid_position_to_position(grid_position, self.tile_size)
