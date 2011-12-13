@@ -16,8 +16,7 @@ class UserInputManager():
             for event in pygame.event.get():
                 newEvent = None
                 if event.type == QUIT:
-                    newEvent = ProgramQuitEvent()
-                    self.eventManager.post(newEvent)
+                    newEvent = events.UserQuitEvent()
                     
                 elif event.type == KEYDOWN:
                     if event.key in [pygame.K_ESCAPE]:

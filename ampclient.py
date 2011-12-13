@@ -42,25 +42,23 @@ class ProgramClock():
     def run(self):
         if self.running == True:
             reactor.callLater((1.0 / self.FPS), self.run)
+
+            self.last_time = self.current_time
+            self.current_time = time.time()
+            self.delta_time = self.current_time - self.last_time # get delta time
+
+            event = events.TickEvent(self.delta_time)
+            self.eventManager.post(event)
+
+            #event = RenderEvent()
+            #self.eventManager.post(event)
+
         else:
-            pass
-
-        self.last_time = self.current_time
-        self.current_time = time.time()
-        self.delta_time = self.current_time - self.last_time # get delta time
-
-        event = events.TickEvent(self.delta_time)
-        self.eventManager.post(event)
-
-        #event = RenderEvent()
-        #self.eventManager.post(event)
-
-    def _stop(self):
-        self.running = False
+            reactor.stop()
 
     def notify(self, event):
-        if event.name == 'Program Quit Event':
-            self._stop()
+        if event.name == 'User Quit Event':
+            self.running = False
         
 
 class SpriteStatsDirectory():
@@ -407,6 +405,10 @@ class ClientView():
         rabbyt.set_default_attribs()
         pygame.display.set_caption('Project Defender')
 
+    def _quit_program(self):
+        pygame.quit()
+        print 'Stopping the Client State...'
+
     def _handle_user_mouse_input(self, mouse_button, mouse_position):
         grid_position = mapgrid.convert_position_to_grid_position(mouse_position, self.tile_size)
         if mouse_button == 'LEFT':
@@ -534,6 +536,9 @@ class ClientView():
                 event = events.ChangedGameStateRequestEvent()
                 self.eventManager.post(event)
 
+        elif event.name == 'Program Quit Event':
+            self._quit_program()
+            
         elif event.name == 'Complete Game State Event':
             self.initial_game_state_received = True
             self._update_game_state(event.complete_game_state)
@@ -545,7 +550,6 @@ class ClientView():
             mouse_button = event.mouse_button
             mouse_position = event.mouse_position
             self._handle_user_mouse_input(mouse_button, mouse_position)
-
 
 def main():
     object_registry = {}
@@ -559,9 +563,10 @@ def main():
     clientView = ClientView(eventManager, object_registry)
     
     # class responsible for sending messages to the server
-    messageSender = clientnetworkportal.MessageSender(eventManager, eventEncoder)
+    #messageSender = clientnetworkportal.MessageSender(eventManager, eventEncoder)
     ip_address = propertiesloader.load_properties()
-    clientnetworkportal.connect_to_server(messageSender, ip_address)
+    clientConnector = clientnetworkportal.ClientConnector(eventManager, eventEncoder, ip_address)
+    clientConnector.connect()
             
     programClock.run()
     reactor.run()

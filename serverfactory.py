@@ -92,6 +92,9 @@ class ClientConnectionProtocol(amp.AMP):
         print 'New client #' + str(self.client_number) + str(self.transport.client)
         event = events.NewClientConnectedEvent(self.client_number, self.client_ip)
         self.eventManager.post(event)
+
+    def disconnect(self):
+        self.transport.loseConnection()
         
     def _getPeer():
         return self.transport.getPeer()
@@ -154,5 +157,8 @@ class ClientConnectionProtocol(amp.AMP):
 
         elif event.name == 'Changed Game State Event':
             self.update_changed_game_state(event)
+
+        elif event.name == 'Server Quit Event':
+            self.disconnect()
             
     

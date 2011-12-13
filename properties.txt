@@ -1,2 +1,2 @@
 #Defender Properties File
-ip-address=192.168.0.5
+ip-address=localhost
