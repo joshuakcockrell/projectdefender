@@ -26,6 +26,21 @@ class NewClientConnectedEvent(Event):
         self.client_number = client_number
         self.client_ip = client_ip
 
+class ConnectedToServerEvent(Event):
+    '''used by the client to know when weve connected'''
+    def __init__(self):
+        self.name = 'Connected To Server Event'
+
+class DisconnectedFromServerEvent(Event):
+    '''used by the client to know when we disconnected'''
+    def __init__(self):
+        self.name = 'Disconnected From Server Event'
+
+class UserQuitEvent(Event):
+    '''when our clients quit the game'''
+    def __init__(self):
+        self.name = 'User Quit Event'
+
 class TextMessageEvent(Event):
     ''' Just text '''
     def __init__(self, text, send_over_network):
@@ -177,6 +192,7 @@ class EventManager():
     def __init__(self):
         self.listeners = WeakKeyDictionary() # holds our listeners
         self.event_queue = []
+        self.processing_events = True
 
     def add_listener(self, listener):
         self.listeners[listener] = True
@@ -189,17 +205,20 @@ class EventManager():
         self._add_event_to_queue(event)
         if event.name == 'Tick Event':
             self._process_event_queue()
+        if event.name == 'Program Quit Event':
+            self.processing_events = False
 
     def _add_event_to_queue(self, event):
         self.event_queue.append(event)
 
     def _process_event_queue(self):
-        event_number = 0
-        while event_number < len(self.event_queue):
-            event = self.event_queue[event_number]
-            event_number += 1
-            for listener in self.listeners:
-                listener.notify(event)
-        self.event_queue = []
+        if self.processing_events:
+            event_number = 0
+            while event_number < len(self.event_queue):
+                event = self.event_queue[event_number]
+                event_number += 1
+                for listener in self.listeners:
+                    listener.notify(event)
+            self.event_queue = []
 
 
