@@ -31,10 +31,21 @@ class ConnectedToServerEvent(Event):
     def __init__(self):
         self.name = 'Connected To Server Event'
 
-class DisconnectedFromServerEvent(Event):
-    '''used by the client to know when we disconnected'''
+class StopNetworkConnectionEvent(Event):
+    '''used by the client state to inform everyone that were stopping'''
     def __init__(self):
-        self.name = 'Disconnected From Server Event'
+        self.name = 'Stop Network Connection Event'
+
+class ConnectionFailedEvent(Event):
+    '''used by the client to know when we disconnected'''
+    def __init__(self, reconnectable_factory):
+        self.name = 'Connection Failed Event'
+        self.reconnectable_factory = reconnectable_factory
+
+class ConnectionLostEvent(Event):
+    '''used by the client when we lose connection of the server'''
+    def __init__(self):
+        self.name = 'Connection Lost Event'
 
 class UserQuitEvent(Event):
     '''when our clients quit the game'''

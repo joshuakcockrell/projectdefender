@@ -57,7 +57,7 @@ class ProgramClock():
             reactor.stop()
 
     def notify(self, event):
-        if event.name == 'User Quit Event':
+        if event.name == 'Stop Network Connection Event':
             self.running = False
         
 
@@ -160,7 +160,7 @@ class Particle(ClientSpriteObject):
         self.set_texture()
 
         self.speed = 50
-        self.decay_time = 4.0
+        self.decay_time = 2.0
         object_velocity = self._get_random_velocity()
 
         self.set_center_position(object_position)
@@ -169,11 +169,10 @@ class Particle(ClientSpriteObject):
 
     def _load_textures(self):
         if self.particle_type == 'basic':
-            self.textures['alive'] = os.path.join('resources', 'blackbullet.png')
+            self.textures['alive'] = os.path.join('resources', 'whitebullet.png')
         elif self.particle_type == 'glitter':
-            self.textures['alive'] = os.path.join('resources', 'blackbullet.png')
-            self.textures['yellow'] = os.path.join('resources', 'yellowbullet.png')
-
+            self.textures['alive'] = os.path.join('resources', 'whitebullet.png')
+        self._set_default_color()
     def _get_random_velocity(self):
         velocity_x = (random.random() * random.choice([-1, 1]) * self.speed)
         velocity_y = (random.random() * random.choice([-1, 1]) * self.speed)
@@ -183,13 +182,20 @@ class Particle(ClientSpriteObject):
         if self.state == 'pending removal':
             return True
 
+    def _set_default_color(self):
+        self.red = 0.0
+        self.green = 0.0
+        self.blue = 0.0
     def _set_random_texture(self):
         # SOO SLOW
         if getrandbits(1):
-            self.texture = self.textures['alive']
+            self.red = 0.0
+            self.green = 0.0
+            self.blue = 0.0
         else:
-            self.texture = self.textures['yellow']
-            
+            self.red = 0.0
+            self.green = 0.8
+            self.blue = 0.0        
 
     def update(self, delta_time):
         if self.state != 'pending removal':
@@ -200,7 +206,7 @@ class Particle(ClientSpriteObject):
             if self.alpha <= 0:
                 self.state = 'pending removal'
 
-        #self._set_random_texture()
+        self._set_random_texture()
         
 class WallSprite(ClientSpriteObject):
     def __init__(self, screen_dimensions, object_id, object_state,
@@ -248,7 +254,7 @@ class ProjectileSprite(ClientSpriteObject):
         self.set_texture()
 
         self.particle_timer = 0.0
-        self.time_between_particles = .015
+        self.time_between_particles = .05
 
         self.set_position(object_position)
         self.set_velocity(object_velocity)
@@ -270,27 +276,31 @@ class ProjectileSprite(ClientSpriteObject):
             self.particles.append(particle)
 
     def update(self, delta_time):
-        # dont update if were pending removal
-        if self.state == 'pending removal':
-            return
+        self.previous_state = self.state
+        if self.state in self.textures:
+            # dont update if were pending removal
+            if self.state == 'pending removal':
+                return
 
-        for p in self.particles:
-                p.update(delta_time)
-                if p.is_pending_removal():
-                     self.particles.remove(p)
+            for p in self.particles:
+                    p.update(delta_time)
+                    if p.is_pending_removal():
+                         self.particles.remove(p)
 
-        if self.state == 'dead':
-            if len(self.particles) <= 0:
-                self.state = 'pending removal'
+            if self.state == 'dead':
+                if len(self.particles) <= 0:
+                    self.state = 'pending removal'
 
+            else:
+            
+                self.set_texture()
+                self.spawn_particles(delta_time)
+                    
+                # set the position
+                self.position[0] += self.velocity[0] * delta_time
+                self.position[1] += self.velocity[1] * delta_time
         else:
-        
-            self.set_texture()
-            #self.spawn_particles(delta_time)
-                
-            # set the position
-            self.position[0] += self.velocity[0] * delta_time
-            self.position[1] += self.velocity[1] * delta_time
+            self.state = self.previous_state
 
 class EnemySprite(ClientSpriteObject):
     def __init__(self, screen_dimensions, object_id, object_state,
@@ -397,6 +407,7 @@ class ClientView():
         self.user_placing_tower = True
 
     def _initialize_display(self, screen_dimensions):
+        print 'INIT DISPLAY'
         pygame.init()
         self.screen = pygame.display.set_mode((screen_dimensions[0], screen_dimensions[1]),
                                               pygame.OPENGL | pygame.DOUBLEBUF)
@@ -405,9 +416,22 @@ class ClientView():
         rabbyt.set_default_attribs()
         pygame.display.set_caption('Project Defender')
 
-    def _quit_program(self):
+    def quit_pygame(self):
+        '''so we can call this after everything else'''
+        print 'PYGAME QUIT'
         pygame.quit()
-        print 'Stopping the Client State...'
+        
+    def _quit_program(self, reason, reconnectable_factory=None):
+        self.exit_reason = reason
+        self.reconnectable_factory = reconnectable_factory
+        print 'Stopping Network Connection...'
+        print 'reason' + str(self.exit_reason)
+
+    def get_exit_reason(self):
+        return self.exit_reason
+
+    def get_reconnectable_factory(self):
+        return self.reconnectable_factory
 
     def _handle_user_mouse_input(self, mouse_button, mouse_position):
         grid_position = mapgrid.convert_position_to_grid_position(mouse_position, self.tile_size)
@@ -536,8 +560,20 @@ class ClientView():
                 event = events.ChangedGameStateRequestEvent()
                 self.eventManager.post(event)
 
-        elif event.name == 'Program Quit Event':
-            self._quit_program()
+        elif event.name == 'User Quit Event':
+            self._quit_program('USERQUIT')
+            event = events.StopNetworkConnectionEvent()
+            self.eventManager.post(event)
+
+        elif event.name == 'Connection Failed Event':
+            self._quit_program('CONNECTIONFAILED', event.reconnectable_factory)
+            event = events.StopNetworkConnectionEvent()
+            self.eventManager.post(event)
+            
+        elif event.name == 'Connection Lost Event':
+            self._quit_program('CONNECTIONLOST')
+            event = events.StopNetworkConnectionEvent()
+            self.eventManager.post(event)
             
         elif event.name == 'Complete Game State Event':
             self.initial_game_state_received = True
@@ -551,27 +587,40 @@ class ClientView():
             mouse_position = event.mouse_position
             self._handle_user_mouse_input(mouse_button, mouse_position)
 
-def main():
-    object_registry = {}
-    # creates messages to send every one second
-    eventEncoder = events.EventEncoder()
-    eventManager = events.EventManager()
+class ClientOverlord():
+    def __init__(self):
+        self.object_registry = {}
+        # creates messages to send every one second
+        self.eventEncoder = events.EventEncoder()
+        self.eventManager = events.EventManager()
 
-    programClock = ProgramClock(eventManager)
-    userInputManager = userinputmanager.UserInputManager(eventManager)
+        self.programClock = ProgramClock(self.eventManager)
+        self.userInputManager = userinputmanager.UserInputManager(self.eventManager)
 
-    clientView = ClientView(eventManager, object_registry)
-    
-    # class responsible for sending messages to the server
-    #messageSender = clientnetworkportal.MessageSender(eventManager, eventEncoder)
-    ip_address = propertiesloader.load_properties()
-    clientConnector = clientnetworkportal.ClientConnector(eventManager, eventEncoder, ip_address)
-    clientConnector.connect()
-            
-    programClock.run()
-    reactor.run()
-            
-if __name__ == '__main__':
-    import cProfile
-    main()
-    #cProfile.run('main()')
+        self.ip_address = propertiesloader.load_properties()
+
+    def run(self):
+        clientConnector = clientnetworkportal.ClientConnector(self.eventManager, self.eventEncoder, self.ip_address)
+        clientConnector.connect()
+
+        self.clientView = ClientView(self.eventManager, self.object_registry)
+
+        self.programClock.run()
+        reactor.run()
+
+        exit_reason = self.clientView.get_exit_reason()
+        self.reconnectable_factory = self.clientView.get_reconnectable_factory()
+        self.clientView.quit_pygame()
+        print 'Returning to Main Menu...'
+        return exit_reason
+
+    def reconnect_and_run(self):
+        print 'RECONNECTING'
+        self.clientView = ClientView(self.eventManager, self.object_registry)
+
+        self.programClock = ProgramClock(self.eventManager)
+        self.programClock.run()
+        
+        reactor.run()
+        self.reconnectable_factory.reconnect()
+        
