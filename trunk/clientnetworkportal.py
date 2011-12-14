@@ -101,16 +101,24 @@ class ClientFactory(protocol.ClientFactory):
 
     def test(self, iconnector):
         print 'test, connector: ' + str(iconnector)
+
+    def reconnect(self):
+        self.connector.connect()
+        print 'attempted to reconnect'
         
     def startedConnecting(self, connector):
         print 'Connecting to server...'
         
     def clientConnectionFailed(self, connector, reason):
-        print 'connection failed'
+        print '...Connection failed: ' + str(reason.getErrorMessage())
+        self.connector = connector
+        # send ourself so we can use ourself to reconnect
+        event = events.ConnectionFailedEvent(self)
+        self.eventManager.post(event)
 
     def clientConnectionLost(self, connector, reason):
         print 'Connection lost: ' + str(reason.getErrorMessage())
-        event = events.DisconnectedFromServerEvent()
+        event = events.ConnectionLostEvent()
         self.eventManager.post(event)
 
     def buildProtocol(self, addr):
@@ -136,7 +144,7 @@ class ClientConnector():
         self.connection.disconnect()
 
     def notify(self, event):
-        if event.name == 'User Quit Event':
+        if event.name == 'Stop Network Connection Event':
             self.disconnect()
     '''
     connection = protocol.ClientCreator(reactor, amp.AMP).connectTCP(ip_address, 12345)
