@@ -326,7 +326,7 @@ class CharacterSprite(ClientSpriteObject):
         self.position[0] += self.velocity[0] * delta_time
         self.position[1] += self.velocity[1] * delta_time
 
-class ClientView():
+class ClientDisplay():
     def __init__(self, eventManager, object_registry):
         self.eventManager = eventManager
         self.eventManager.add_listener(self)
@@ -339,7 +339,6 @@ class ClientView():
         self._initialize_display(self.screen_dimensions)
         self.clock = pygame.time.Clock()
 
-        self.sprite_stats_directory = SpriteStatsDirectory()
         self.exit_reason = None
 
         self.user_controlled_character = None
