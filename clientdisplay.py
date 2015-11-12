@@ -16,6 +16,8 @@ import rabbyt
 import events
 import userinputmanager
 
+import mapgrid
+
 class ClientSpriteObject(rabbyt.Sprite):
     def __init__(self, screen_dimensions, object_state, object_id=None):
 
@@ -117,9 +119,9 @@ class Particle(ClientSpriteObject):
 
     def _load_textures(self):
         if self.particle_type == 'basic':
-            self.textures['alive'] = os.path.join('resources', 'whitebullet.png')
+            self.textures['alive'] = os.path.join('resources', 'yellowbullet.png')
         elif self.particle_type == 'glitter':
-            self.textures['alive'] = os.path.join('resources', 'whitebullet.png')
+            self.textures['alive'] = os.path.join('resources', 'yellowbullet.png')
         self._set_default_color()
     def _get_random_velocity(self):
         velocity_x = (random.random() * random.choice([-1, 1]) * self.speed)
@@ -250,6 +252,7 @@ class ProjectileSprite(ClientSpriteObject):
         else:
             self.state = self.previous_state
 
+'''
 class EnemySprite(ClientSpriteObject):
     def __init__(self, screen_dimensions, object_id, object_state,
                  object_position, object_velocity):
@@ -296,7 +299,7 @@ class EnemySprite(ClientSpriteObject):
             p.update(delta_time)
             if p.is_pending_removal():
                  self.particles.remove(p)
-          
+'''         
 class CharacterSprite(ClientSpriteObject):
     def __init__(self, screen_dimensions, object_id, object_state,
                  object_position, object_velocity):

@@ -133,15 +133,15 @@ class ShootProjectileRequestEvent(Event):
         self.client_number = client_number
         self.send_over_network = True
 
-class AddEnemyToGameRequestEvent(Event):
-    '''
-    EnemyGenerator creates this to make a new enemy for the server state
-    not sent over the network
-    '''
-    def __init__(self, spawn_position):
-        self.name = 'Add Enemy To Game Request Event'
-        self.spawn_position = spawn_position
-        
+##class AddEnemyToGameRequestEvent(Event):
+##    '''
+##    EnemyGenerator creates this to make a new enemy for the server state
+##    not sent over the network
+##    '''
+##    def __init__(self, spawn_position):
+##        self.name = 'Add Enemy To Game Request Event'
+##        self.spawn_position = spawn_position
+
 class EventEncoder():
     def __init__(self):
         pass

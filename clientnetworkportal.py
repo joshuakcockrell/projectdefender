@@ -129,7 +129,7 @@ class ClientFactory(protocol.ClientFactory):
         
 
 class ClientConnector():
-    def __init__(self, eventManager, eventEncoder, ip_address='localhost', port=12345):
+    def __init__(self, eventManager, eventEncoder, ip_address='localhost', port=5887):
         self.ip_address = ip_address
         self.port = port
         self.eventManager = eventManager
